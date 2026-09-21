@@ -7,6 +7,8 @@ cd "$(dirname "$0")/.."
 source .venv/bin/activate
 # FlashInfer JIT-compiles kernels with nvcc; vLLM marks FlashInfer "unavailable" if nvcc is not on PATH.
 [ -d /usr/local/cuda/bin ] && export CUDA_HOME="${CUDA_HOME:-/usr/local/cuda}" PATH="/usr/local/cuda/bin:$PATH"
+# Unified memory: ninja would fan out ~20 nvcc processes during FlashInfer JIT and OOM the box next to the loaded weights.
+export MAX_JOBS="${MAX_JOBS:-4}" FLASHINFER_NVCC_THREADS="${FLASHINFER_NVCC_THREADS:-4}"
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
 export PYTORCH_CUDA_ALLOC_CONF="${PYTORCH_CUDA_ALLOC_CONF:-expandable_segments:True}"
 exec vllm serve "${MODEL:-Qwen/Qwen3-8B}" \

@@ -8,6 +8,8 @@
 | Memory | 119 GiB unified (LPDDR5x), shared CPU/GPU |
 | GPU | NVIDIA GB10, compute capability 12.1 (`sm_121`), driver 580.126.09, CUDA 13.0 (`/usr/local/cuda-13.0`) |
 | Disk | 916 GB NVMe, ~148 GB free at probe time |
+| CUDA toolkit | `/usr/local/cuda` = 13.0, `nvcc` present but **not on PATH**; scripts export `CUDA_HOME` and prepend `/usr/local/cuda/bin` (FlashInfer JIT needs it) |
+| FlashInfer JIT | keep `MAX_JOBS=4 FLASHINFER_NVCC_THREADS=4`; default ninja parallelism OOM-hangs the box on unified memory (happened 2026-09-22) |
 | Python | system 3.12.3 **without headers** (`python3.12-dev` missing → Triton JIT fails). Project uses uv-managed CPython 3.12.14 (`python-preference = only-managed`) |
 | Docker | 29.1.3, user `hsnl` in `docker` group; NVIDIA runtime is the default runtime |
 | k8s | node in the lab cluster (kubelet, flannel, HAMi webhook). Cordoned 2026-09-21 so no new pods land here |
