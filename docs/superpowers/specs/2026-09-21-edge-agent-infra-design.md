@@ -7,6 +7,7 @@ An IT self-healing agent that runs entirely on the lab DGX Spark: local LLM infe
 - Project folder `~/edge-agent` on the Spark, git-tracked, uv-managed (Python 3.12, `uv.lock` pinned → reproducible offline rebuild).
 - vLLM installed bare-metal from PyPI wheels (aarch64, CUDA 13 / `sm_121`), no containers. Verified stack: uv 0.12.17, uv-managed CPython 3.12.14, vLLM 0.29.0, torch 2.13.0+cu130 (plain PyPI aarch64 wheel), FlashInfer 0.6.18, transformers 5.17.0, Triton 3.7.1.
 - Model `Qwen/Qwen3-8B` (BF16, ~16 GB) cached in the shared HF cache; server runs with `HF_HUB_OFFLINE=1`.
+  **Amended 2026-09-22:** default switched to `Qwen/Qwen3.6-35B-A3B-FP8` + MTP speculative decoding after the benchmark in `docs/bench-2026-09-22.md` (66.6 vs 14.1 tok/s single stream, 8/8 on the needle probe).
 - `scripts/serve.sh`: OpenAI-compatible server on `127.0.0.1:8100`, served name `edge-agent`, tool calling (`hermes` parser) + reasoning parser `qwen3`, 32k context, GPU budget 50 % of unified memory.
 - `scripts/smoke.py`: health → chat → parsed tool call; exits non-zero on failure.
 - `systemd/vllm-edge.service`: user unit, `Restart=always`, starts at boot (Linger is on) — the base for "self-reliant when offline".

@@ -24,7 +24,7 @@ until curl -sf "http://127.0.0.1:$PORT/health" >/dev/null 2>&1; do
   sleep 5
 done
 echo "[$TAG] healthy after $(( $(date +%s) - t0 ))s | $(grep -oE 'GPU KV cache size: [0-9,]+ tokens' "$LOG" | tail -1) | $(grep -oE 'Model loading took [0-9.]+ GiB' "$LOG" | tail -1)"
-VLLM_URL="http://127.0.0.1:$PORT" python scripts/bench.py
+VLLM_URL="http://127.0.0.1:$PORT" ${RUN:-python scripts/bench.py}   # RUN="python scripts/probe.py" swaps the workload
 VLLM_URL="http://127.0.0.1:$PORT" python scripts/smoke.py 2>&1 | tail -2
 kill "$PID" 2>/dev/null; wait "$PID" 2>/dev/null
 echo "[$TAG] done"

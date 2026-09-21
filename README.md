@@ -1,14 +1,18 @@
 # edge-agent
 
 Offline-capable IT self-healing agent on the lab DGX Spark (GB10, 119 GiB unified memory, aarch64).
-Phase 1 = inference infra: vLLM serving `Qwen/Qwen3-8B` behind an OpenAI-compatible API. Design: `docs/superpowers/specs/2026-09-21-edge-agent-infra-design.md`. Host facts: `docs/spark-hw.md`.
+Phase 1 = inference infra: vLLM serving `Qwen/Qwen3.6-35B-A3B-FP8` (+ MTP speculative decoding, ~67 tok/s single stream) behind an OpenAI-compatible API. Model/acceleration choice: `docs/bench-2026-09-22.md`. Design: `docs/superpowers/specs/2026-09-21-edge-agent-infra-design.md`. Host facts: `docs/spark-hw.md`.
 
 ## Layout
 ```
 pyproject.toml / uv.lock      uv project, Python 3.12, vllm + openai pinned
 scripts/download.sh           one-time online model pull into ~/.cache/huggingface
-scripts/serve.sh              vllm serve … (offline, 127.0.0.1:8100, model alias "edge-agent")
+scripts/serve.sh              vllm serve … (offline, 127.0.0.1:8100, model alias "edge-agent", MTP on)
 scripts/smoke.py              health → chat → tool call; prints SMOKE OK
+scripts/bench.py              decode / concurrency / prefill / thinking throughput
+scripts/probe.py              8-question needle accuracy over a synthetic runbook corpus
+scripts/try.sh                throwaway server + bench|probe + smoke for a model/flag combo (:8101)
+scripts/bench-summary.py      logs/matrix.log → markdown table
 systemd/vllm-edge.service     user unit: auto-start at boot, auto-restart
 ```
 
@@ -16,15 +20,16 @@ systemd/vllm-edge.service     user unit: auto-start at boot, auto-restart
 ```bash
 cd ~/edge-agent
 uv sync                     # recreates .venv from uv.lock (downloads uv-managed CPython 3.12 the first time)
-scripts/download.sh         # ~16 GB
+scripts/download.sh         # MODEL=… ; the 35B FP8 is ~35 GB, Qwen3-8B ~16 GB
 ```
 
 ## Run
 ```bash
-scripts/serve.sh            # foreground; first start ~1-2 min (weights + torch.compile + cudagraphs)
+scripts/serve.sh            # foreground; start ~6-7 min for the 35B (weights + compile + cudagraphs), ~4 min for Qwen3-8B
 uv run scripts/smoke.py     # in another shell
 ```
-Env overrides: `MODEL`, `SERVED_NAME`, `HOST` (set `0.0.0.0` to expose on the LAN), `PORT`, `MAX_MODEL_LEN`, `GPU_MEM_UTIL`. Extra `vllm serve` flags pass through.
+Env overrides: `MODEL`, `TOOL_PARSER` (`qwen3_coder` for Qwen3.5+, `hermes` for Qwen3-8B), `SPEC` (speculative-config JSON, empty disables), `SERVED_NAME`, `HOST` (set `0.0.0.0` to expose on the LAN), `PORT`, `MAX_MODEL_LEN`, `MAX_NUM_SEQS`, `GPU_MEM_UTIL`. Extra `vllm serve` flags pass through.
+FlashInfer JIT on first start is capped at `MAX_JOBS=4` — never raise it on this box (see docs/bench-2026-09-22.md, incident).
 
 ## As a service (survives reboot / crash)
 ```bash
