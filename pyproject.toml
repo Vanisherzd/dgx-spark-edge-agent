@@ -1,0 +1,12 @@
+[project]
+name = "edge-agent"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=3.16.2",
+    "vllm>=0.29.0",
+]
+
+[tool.uv]
+# ponytail: managed CPython ships Python.h; system python3.12 lacks -dev headers and Triton JIT needs them
+python-preference = "only-managed"

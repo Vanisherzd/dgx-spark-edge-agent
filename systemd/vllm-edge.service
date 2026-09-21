@@ -1,0 +1,17 @@
+[Unit]
+Description=vLLM edge-agent inference server (offline-capable)
+After=network.target
+
+[Service]
+WorkingDirectory=%h/edge-agent
+ExecStart=%h/edge-agent/scripts/serve.sh
+Environment=HOST=127.0.0.1
+Environment=PORT=8100
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+KillSignal=SIGINT
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
