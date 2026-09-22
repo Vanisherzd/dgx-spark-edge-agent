@@ -42,6 +42,19 @@ Drill: `logs/nemoclaw-drill.sh <case>` = reset -> inject -> `nemoclaw edge-agent
 verify -> print the ops-api call log. No auth on the ops API yet (docker-bridge reachability only); add a token before
 exposing it further.
 
+## NemoClaw drill findings (2026-09-22)
+Driving the same fault through the NemoClaw sandbox agent (OpenClaw runtime, Nemotron via TensorRT-LLM) needed, in order:
+1. the request-shape shim (`scripts/oai_shim.py`) — otherwise every follow-up turn is a 400;
+2. a way to act on the host: `scripts/ops_api.py` (HTTP + MCP) plus the OpenShell endpoint rule; the model ignores
+   "use curl" instructions and reaches for `docker`, so the tools must be real tools (MCP server `ops`) and/or a skill;
+3. tolerance for small-model tool-calling slop, all handled server-side: missing `name`, `container` instead of `name`,
+   arguments as JSON strings, and `write_config` content arriving with literal `\n` (double-escaped through OpenClaw's
+   `tool_call` meta-tool) — that last one made a correct fix produce an unparsable one-line nginx.conf;
+4. never let a tool bug drop the connection: OpenClaw pauses an MCP server after three `fetch failed`.
+OpenClaw hides MCP tools behind `tool_search`/`tool_describe`/`tool_call` with long ids (`mcp:bundle-mcp:ops__docker_logs`);
+Nemotron-3-Nano occasionally typos them. `self_heal` (one MCP call that runs the host loop) is the fallback when the
+sandbox agent stalls. Run: `logs/nemoclaw-drill-mcp.sh bad-config` (drill script kept in `scripts/nemoclaw-drill.sh`).
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.
