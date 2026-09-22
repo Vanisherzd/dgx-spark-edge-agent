@@ -296,8 +296,12 @@ def run_tool(name, args, dry_run):
             return f"DRY-RUN: would signal {pid} ({cmd[:80]})"
         sig = "-9" if args.get("force") else "-15"
         sh(f"kill {sig} {pid}")
-        time.sleep(1)
-        return f"signalled {pid} with {sig} ({cmd[:80]}); " + ("still running" if sh(f"ps -p {pid} -o pid=").strip() else "gone")
+        for _ in range(6):                       # SIGTERM is a request; give the process a moment to honour it
+            time.sleep(0.5)
+            if not sh(f"ps -p {pid} -o pid=").strip():
+                return f"signalled {pid} with {sig} ({cmd[:80]}); gone"
+        return (f"signalled {pid} with {sig} ({cmd[:80]}); still running after 3s"
+                + ("" if args.get("force") else " — call again with force=true to send SIGKILL"))
     return f"unknown tool {name}"
 
 

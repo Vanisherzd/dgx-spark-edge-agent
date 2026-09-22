@@ -183,7 +183,7 @@ curl -sf http://127.0.0.1:8000/health && echo trt-ok; nemoclaw edge-agent status
 # 停
 docker stop trtllm-edge; pkill -f oai_shim.py; pkill -f ops_api.py; nemoclaw edge-agent stop
 ```
-Log 位置：`logs/trt-serve.log`（引擎）、`logs/oai-shim.log`（`SHIM_DEBUG=1` 時記錄訊息形狀與上游 400）、`logs/ops-api.log`（每一次工具呼叫：來源、工具、參數、結果）、`logs/agent/*.jsonl`（每次自我修復的逐步決策）、`nemoclaw edge-agent logs -n 200`（sandbox 內 gateway）。
+Log 位置：`docker logs trtllm-edge`（引擎，`logs/trt-serve.log` 只是啟動時的 nohup 副本，可能被清理掉）、`logs/oai-shim.log`（`SHIM_DEBUG=1` 時記錄訊息形狀與上游 400）、`logs/ops-api.log`（每一次工具呼叫：來源、工具、參數、結果）、`logs/agent/*.jsonl`（每次自我修復的逐步決策）、`nemoclaw edge-agent logs -n 200`（sandbox 內 gateway）。
 
 ## 5. 我們做過的測試與數據
 
