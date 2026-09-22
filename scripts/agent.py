@@ -84,6 +84,12 @@ def run_tool(name, args, dry_run):
     args = args or {}
     if "name" in args and args["name"] is None:
         args.pop("name")
+    for alias in ("container", "container_name", "service"):   # small models / meta-tool layers rename things
+        if alias in args and "name" not in args:
+            args["name"] = args.pop(alias)
+    c = args.get("content")
+    if isinstance(c, str) and "\n" not in c and "\\n" in c:   # double-escaped JSON: literal backslash-n, no real newlines
+        args["content"] = c.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
     if name in ("docker_logs", "docker_exec", "docker_start", "docker_restart") and "name" not in args:
         return f"error: {name} needs args.name (one of {sorted(NAMES)})"
     if name == "docker_exec" and "cmd" not in args:
