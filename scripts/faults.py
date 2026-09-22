@@ -46,6 +46,8 @@ def http(path):
 
 
 def setup():
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
+    (CONF_DIR / "default.conf").write_text(GOOD_CONF)   # the file is not tracked by git; drills rewrite it
     sh(f"docker network create {NET} 2>/dev/null")
     sh(f"docker rm -f {FRONT} {APP} >/dev/null 2>&1")
     sh(f"docker run -d --name {APP} --network {NET} --restart no nginx:latest", check=True)
