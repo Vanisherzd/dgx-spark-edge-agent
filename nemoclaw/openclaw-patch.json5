@@ -9,6 +9,29 @@
     alsoAllow: ["bundle-mcp", "exec", "read"],       // bundle-mcp = the ops MCP server (host tools)
     toolSearch: false,                               // tools go straight into the request's tools array
   },
+  models: {
+    mode: "merge",
+    providers: {
+      inference: {
+        models: [
+          {
+            id: "edge-agent",
+            name: "inference/edge-agent",
+            reasoning: true,
+            input: ["text"],
+            compat: { supportsStore: false, supportsDeveloperRole: false },
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            // Onboarding wrote 131072, but trtllm-serve runs with max_seq_len 32768: OpenClaw would let a session
+            // grow past what the server accepts instead of compacting.
+            contextWindow: 32768,
+            // Onboarding wrote 4096. A reasoning model spends most of that thinking: one bad-config drill burned the
+            // whole budget reasoning about a missing semicolon and returned stopReason=length with nothing emitted.
+            maxTokens: 12288,
+          },
+        ],
+      },
+    },
+  },
   agents: {
     defaults: {
       skills: ["ops"],                               // was: 16 visible skills, 15 of them irrelevant (meme-maker, notion, weather...)

@@ -53,6 +53,8 @@ Actions, least invasive first:
 - Touch only those two containers and that one config file. Everything else on this host belongs to someone else.
 - Never delete an image, a volume, or another container.
 - If the same action fails twice, stop repeating it and look for a different cause.
+- Once the evidence names the fault, act on it. Re-reading the same config or re-arguing a conclusion you already
+  reached spends the turn without changing anything; the tools, not more thought, are what tell you if you are right.
 - If you cannot reach 200/200, stop and report: the symptom, what you ruled out, the exit code and the last log lines.
   An honest escalation is a valid outcome; a silent loop is not.
 
