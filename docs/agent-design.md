@@ -56,13 +56,18 @@ Nemotron-3-Nano occasionally typos them. `self_heal` (one MCP call that runs the
 sandbox agent stalls. Run: `logs/nemoclaw-drill-mcp.sh bad-config` (drill script kept in `scripts/nemoclaw-drill.sh`).
 
 ## NemoClaw drill result (2026-09-22 15:41)
-`logs/nemoclaw-drill-mcp.sh bad-config` -> PASS in 2.5 min; `upstream-down` -> PASS in 2 min (root cause: app container exited; action: docker_start). The sandbox agent (NemoClaw, OpenClaw runtime, Nemotron via
+`logs/nemoclaw-drill-mcp.sh bad-config` -> PASS in 2.5 min; `upstream-down` -> PASS in 2 min (root cause: app container exited; action: docker_start); `nginx-stopped` -> PASS in 3 min (docker_start edge-victim). 3/3. The sandbox agent (NemoClaw, OpenClaw runtime, Nemotron via
 TensorRT-LLM) called `ops__self_heal` over MCP; the host loop diagnosed the missing semicolon, rewrote the config,
 restarted the container, verified 200/200; the agent reported root cause / actions / final health. Two routes exist:
 - **self_heal** (one MCP call, reliable): NemoClaw is the interface and orchestrator, the same local model runs the
   step-by-step decision loop on the host. Use this for demos and for the hackathon judges' fault cases.
 - **step-by-step in the sandbox** (skill `ops` + `/sandbox/bin/ops`, or the individual MCP tools): works when the model
   drives the tools correctly; Nemotron-3-Nano-30B often mangles OpenClaw's meta-tool protocol, so it is best-effort.
+
+Prompt lesson: when the prompt said "use the tools / read the skill", Nemotron-3-Nano spent its turn guessing OpenClaw
+meta-tool ids (`tool_describe ops`, `tool_describe healthcheck`) and gave up twice. When the prompt states the exact shell
+command (`/sandbox/bin/ops call self_heal "{}"`) as step 1 and lists manual `ops call` commands as the fallback, it
+executes it every time. `scripts/nemoclaw-drill.sh` carries that prompt.
 
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
