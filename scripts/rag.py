@@ -57,7 +57,8 @@ def chunks():
 # --- scorers ------------------------------------------------------------------------------------------------------
 
 def keyword_scores(query):
-    """Title-weighted term overlap. Exact error strings are what operators paste, and lexical matching nails those."""
+    """Title-weighted term overlap. Expected to win on pasted error strings; measured, it does not. Kept as the
+    no-index fallback and as the baseline the dense scorer is judged against."""
     terms = set(re.findall(r"[a-z0-9]+", query.lower()))
     scores = {}
     for name, title, text in documents():

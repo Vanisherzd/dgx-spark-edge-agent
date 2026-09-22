@@ -46,6 +46,18 @@ PROTECTED_CMD = re.compile(r"sshd?\b|systemd|dockerd|containerd|trtllm|tensorrt|
                            r"ops_api|oai_shim|uv run|/init\b", re.I)
 
 
+def held_open():
+    """Realpaths this user's processes currently have open. Deleting one frees no space until the writer exits, and
+    the service keeps logging into a file nobody can read again."""
+    out = set()
+    for fd in glob.glob("/proc/[0-9]*/fd/*"):
+        try:
+            out.add(os.path.realpath(fd))
+        except OSError:
+            pass
+    return out
+
+
 def local_target(host):
     """Loopback and RFC1918 only: these tools run on the host for anyone who can reach the ops API, so they must not
     become a probe into the rest of the network (or a cloud metadata endpoint)."""
@@ -245,11 +257,16 @@ def run_tool(name, args, dry_run):
                        else f"{c}: " + (sh(f"docker network connect {faults.NET} {c}") or f"attached to {faults.NET}"))
         return "\n".join(out)
     if name == "cleanup_disk":
-        now, victims = time.time(), []
+        now, victims, skipped = time.time(), [], 0
+        open_files = held_open()
         for pattern in CLEANUP_GLOBS:
             for f in glob.glob(pattern):
-                if os.path.isfile(f) and now - os.path.getmtime(f) > CLEANUP_MIN_AGE_S:
-                    victims.append((f, os.path.getsize(f)))
+                if not os.path.isfile(f) or now - os.path.getmtime(f) <= CLEANUP_MIN_AGE_S:
+                    continue
+                if os.path.realpath(f) in open_files:   # a live service still writes here; unlinking it loses the log
+                    skipped += 1
+                    continue
+                victims.append((f, os.path.getsize(f)))
         freed = sum(n for _, n in victims)
         if dry_run:
             return f"DRY-RUN: would delete {len(victims)} project log file(s), {freed / 1e6:.1f} MB"
@@ -259,7 +276,8 @@ def run_tool(name, args, dry_run):
             except OSError as e:
                 return f"stopped after an error on {f}: {e}"
         usage = shutil.disk_usage("/")
-        return (f"deleted {len(victims)} project log file(s), freed {freed / 1e6:.1f} MB; "
+        return (f"deleted {len(victims)} project log file(s), freed {freed / 1e6:.1f} MB "
+                f"(skipped {skipped} still held open by a running service); "
                 f"/ is now {100 * usage.used / usage.total:.0f}% full with {usage.free / 1e9:.0f} GB free. "
                 "Images and volumes were not touched: report disk pressure instead of deleting shared data.")
     if name == "kill_process":
