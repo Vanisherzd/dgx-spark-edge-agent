@@ -120,3 +120,20 @@ wants it gone). `vllm-edge` autostart removed; nothing starts at boot now (per u
   NEMOCLAW_MODEL=edge-agent NEMOCLAW_COMPATIBLE_AUTH_MODE=none NEMOCLAW_REASONING=true nemoclaw onboard
   --non-interactive --fresh`. The gateway is a host process, so a loopback endpoint is reachable from it.
 - Sudo for the installer was fed through a temporary `SUDO_ASKPASS` helper that was deleted afterwards.
+
+## NemoClaw routing fix (2026-09-22)
+Symptom: onboarding always failed at step 7 ("Compatible endpoint sandbox smoke check failed", 503 / 403 / 401), even
+though the host-side validation of the endpoint passed.
+Cause, in layers:
+1. `policies: none` on the sandbox: nothing may leave the sandbox, not even `inference.local`. Fix:
+   `nemoclaw edge-agent policy add local-inference --yes`.
+2. NemoClaw rewrote the loopback endpoint to its *Ollama auth proxy* (`http://host.openshell.internal:11435/v1`,
+   `~/.nemoclaw/source/scripts/ollama-auth-proxy.mts`, backend :11434) and added a `NEMOCLAW_OLLAMA_PROXY_TOKEN`
+   credential; the proxy answered 401 to every request. The router log (`nemoclaw edge-agent logs`) shows the real
+   upstream: `routing proxy inference request endpoint=http://host.openshell.internal:11435/v1`.
+   Fix: `openshell provider update compatible-endpoint --config OPENAI_BASE_URL=http://host.openshell.internal:8000/v1`.
+3. For that direct route the server must listen on the docker bridge, so `serve-trt.sh` runs with `HOST=0.0.0.0`
+   (`host.openshell.internal` = 172.24.0.1 inside the sandbox). Security note: the API is then reachable on the LAN;
+   add a firewall rule if that matters.
+After the fix `nemoclaw edge-agent status` reports `Inference: healthy` and the TensorRT-LLM access log shows requests
+from 172.24.0.2 (the sandbox). System `ollama.service` was disabled at the user's request (pure TensorRT-LLM).
