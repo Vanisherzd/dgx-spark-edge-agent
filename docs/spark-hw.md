@@ -37,3 +37,9 @@ k8s: `kubectl cordon <node>` applied; `comfyui` deployment scaled to 0. Undo: `k
 | transformers | 5.17.0 |
 | Triton | 3.7.1 |
 | Model | `Qwen/Qwen3-8B` snapshot `b968826d`, 16.4 GB BF16, in `~/.cache/huggingface` (shared blob store `hub/blobs/`) |
+
+## 2026-09-22 cleanup (disk was at 96 % while pulling the TensorRT-LLM image)
+Removed stopped throwaway containers `clever_jackson`, `serene_dijkstra`, `zen_goodall`, `thirsty_grothendieck`,
+`competent_varahamihira`, `infallible_tharp`, `flamboyant_tharp`, `vllm-qwen36` and images `vllm/vllm-openai:gemma`,
+`vllm/vllm-openai:cu130-nightly` (re-pullable). Kept `ghcr.io/spark-arena/dgx-vllm-eugr-nightly` (used by the stopped
+`qwen3-server`). Added: `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc13`, model `nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4`.

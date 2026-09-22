@@ -3,7 +3,9 @@ name = "edge-agent"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+    "lm-eval[api,ifeval]>=0.4.13",
     "openai>=3.16.2",
+    "tenacity>=9.1.4",
     "vllm>=0.29.0",
 ]
 

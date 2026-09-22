@@ -13,6 +13,9 @@ scripts/bench.py              decode / concurrency / prefill / thinking throughp
 scripts/probe.py              8-question needle accuracy over a synthetic runbook corpus
 scripts/try.sh                throwaway server + bench|probe + smoke for a model/flag combo (:8101)
 scripts/bench-summary.py      logs/matrix.log → markdown table
+scripts/serve-summary.py      vllm bench serve JSON → markdown table (TTFT/TPOT/ITL/E2E)
+scripts/serve-trt.sh          TensorRT-LLM alternative: trtllm-serve in the NGC container on :8355 (trt/nano.yaml)
+systemd/trtllm-edge.service   user unit for the TensorRT-LLM path (Conflicts= vllm-edge; one engine at a time)
 systemd/vllm-edge.service     user unit: auto-start at boot, auto-restart
 ```
 
@@ -41,6 +44,10 @@ journalctl --user -u vllm-edge -f
 ## Client
 OpenAI SDK with `base_url="http://127.0.0.1:8100/v1"`, `model="edge-agent"`, any `api_key`.
 Qwen3 thinking mode is on by default; pass `extra_body={"chat_template_kwargs": {"enable_thinking": False}}` to turn it off per request.
+
+## Serving metrics and quality
+`docs/serving-metrics-2026-09-22.md` (TTFT/TPOT/ITL/E2E at 1–16 concurrency, GSM8K 92.7 %, IFEval 78 %, needle 8/8).
+TensorRT-LLM + NemoClaw migration: `docs/plan-trtllm-nemoclaw.md`.
 
 ## Next (Phase 2)
 RAG store + embedding model, remediation tools, bigger model swap (same alias, clients unchanged).

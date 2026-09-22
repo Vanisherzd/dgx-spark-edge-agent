@@ -1,0 +1,17 @@
+[Unit]
+Description=TensorRT-LLM edge-agent inference server (trtllm-serve in NGC container, offline-capable)
+After=network.target docker.service
+Requires=docker.service
+Conflicts=vllm-edge.service
+
+[Service]
+WorkingDirectory=%h/edge-agent
+ExecStart=%h/edge-agent/scripts/serve-trt.sh
+ExecStop=/usr/bin/docker stop -t 30 trtllm-edge
+Restart=always
+RestartSec=15
+TimeoutStartSec=1800
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
