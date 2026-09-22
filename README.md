@@ -13,6 +13,7 @@ scripts/bench.py              decode / concurrency / prefill / thinking throughp
 scripts/probe.py              8-question needle accuracy over a synthetic runbook corpus
 scripts/try.sh                throwaway server + bench|probe + smoke for a model/flag combo (:8101)
 scripts/bench-summary.py      logs/matrix.log → markdown table
+scripts/ops_api.py            host-side HTTP ops API (same tool whitelist) for the NemoClaw sandbox agent, :8790
 scripts/serve-summary.py      vllm bench serve JSON → markdown table (TTFT/TPOT/ITL/E2E)
 scripts/serve-trt.sh          TensorRT-LLM (production): trtllm-serve in the NGC container on :8000 (trt/nano.yaml); vLLM fallback stays on :8100
 systemd/trtllm-edge.service   user unit for the TensorRT-LLM path (Conflicts= vllm-edge; one engine at a time)

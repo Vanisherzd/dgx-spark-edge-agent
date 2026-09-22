@@ -28,6 +28,20 @@ start), `upstream-down` (502 on /api/). `faults.py run <case>` = reset -> inject
 All verdicts were `resolved` with a correct root cause; traces in `logs/agent/*.jsonl`. Run them again with
 `uv run --no-sync scripts/faults.py run <case>`.
 
+## Through NemoClaw (sandboxed OpenClaw agent) — `scripts/ops_api.py`
+The sandbox has no docker and no host filesystem, so the host runs a small HTTP ops API (`uv run --no-sync
+scripts/ops_api.py`, 0.0.0.0:8790) that exposes exactly the agent.py tool whitelist: `GET /tools` (schemas) and
+`POST /call {"name","args"}`. Every call is appended to `logs/ops-api.log` (caller IP, tool, args, result). The
+sandbox is allowed to reach it with one OpenShell rule:
+```
+openshell policy update edge-agent --add-endpoint host.openshell.internal:8790:read-write:rest \
+  --add-allow host.openshell.internal:8790:GET:/tools --add-allow host.openshell.internal:8790:POST:/call \
+  --binary /usr/bin/curl --binary /usr/bin/python3 --binary /usr/local/bin/node --rule-name ops-api --wait
+```
+Drill: `logs/nemoclaw-drill.sh <case>` = reset -> inject -> `nemoclaw edge-agent agent --agent main -m "<task>"` ->
+verify -> print the ops-api call log. No auth on the ops API yet (docker-bridge reachability only); add a token before
+exposing it further.
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.
