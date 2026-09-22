@@ -48,14 +48,40 @@ def http(path):
         return 0
 
 
+# One definition of each container, shared with the agent's host-layer repair tools (scripts/agent.py).
+SPECS = {
+    APP: f"docker run -d --name {APP} --network {NET} --restart no nginx:latest",
+    FRONT: (f"docker run -d --name {FRONT} --network {NET} --restart no -p 127.0.0.1:8880:80 "
+            f"-v {CONF_DIR}:/etc/nginx/conf.d:ro nginx:latest"),
+}
+
+
+def exists(name):
+    return bool(sh(f"docker ps -aq --filter name=^{name}$").stdout.strip())
+
+
+def ensure(name):
+    """Create a container that is gone entirely. Start/restart is the agent's job; this is the missing-container case."""
+    if name not in SPECS:
+        return f"denied: {name!r} is not part of this stack"
+    if exists(name):
+        return f"{name} already exists"
+    if name == FRONT:
+        CONF_DIR.mkdir(parents=True, exist_ok=True)
+        if not (CONF_DIR / "default.conf").exists():
+            (CONF_DIR / "default.conf").write_text(GOOD_CONF)
+    sh(f"docker network create {NET} 2>/dev/null")
+    r = sh(SPECS[name])
+    return f"created {name}" if not r.returncode else f"failed to create {name}: {(r.stderr or r.stdout).strip()[:300]}"
+
+
 def setup():
     CONF_DIR.mkdir(parents=True, exist_ok=True)
     (CONF_DIR / "default.conf").write_text(GOOD_CONF)   # the file is not tracked by git; drills rewrite it
     sh(f"docker network create {NET} 2>/dev/null")
     sh(f"docker rm -f {FRONT} {APP} >/dev/null 2>&1")
-    sh(f"docker run -d --name {APP} --network {NET} --restart no nginx:latest", check=True)
-    sh(f"docker run -d --name {FRONT} --network {NET} --restart no -p 127.0.0.1:8880:80 "
-       f"-v {CONF_DIR}:/etc/nginx/conf.d:ro nginx:latest", check=True)
+    for name in (APP, FRONT):
+        sh(SPECS[name], check=True)
     time.sleep(2)
     print("setup:", "/", http("/"), "/api/", http("/api/"))
 

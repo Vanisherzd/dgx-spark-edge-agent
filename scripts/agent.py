@@ -10,9 +10,11 @@ import argparse
 import json
 import os
 import pathlib
+import glob
 import ipaddress
 import re
 import socket
+import shutil
 import subprocess
 import time
 import urllib.parse
@@ -27,6 +29,20 @@ NAMES = {"edge-victim", "edge-victim-app"}
 HEALTH = {"front": "http://127.0.0.1:8880/", "api": "http://127.0.0.1:8880/api/"}
 EXEC_ALLOW = ("nginx -t", "nginx -T", "cat ", "ls", "ps", "curl", "df", "du", "tail", "head", "grep", "id", "env")
 UNIT_RE = re.compile(r"^[A-Za-z0-9@._:-]{1,64}$")          # systemd unit / journal identifier
+
+# --- host layer -------------------------------------------------------------------------------------------------
+# What this agent may touch outside the two containers. The rule behind the list: only things this project created.
+# Deliberately absent, and why:
+#   docker.service / containerd  - the inference server runs as `docker run --rm`, so bouncing the daemon deletes the
+#                                  model this agent thinks with. A stopped daemon is unrecoverable from in here by
+#                                  construction; report it and escalate.
+#   any system unit              - sudo on this host needs a password, and no password belongs in this repo.
+#   images and volumes           - shared with the rest of the lab; the agent reports pressure, a human decides.
+CLEANUP_GLOBS = (str(ROOT / "logs" / "*.log"), str(ROOT / "logs" / "*.jsonl"), str(ROOT / "logs" / "*.out"),
+                 str(ROOT / "logs" / "agent" / "*.jsonl"), "/tmp/edge-agent-*")
+CLEANUP_MIN_AGE_S = 600        # never delete a file something is probably still writing
+PROTECTED_CMD = re.compile(r"sshd?\b|systemd|dockerd|containerd|trtllm|tensorrt|openclaw|openshell|nemoclaw|"
+                           r"ops_api|oai_shim|uv run|/init\b", re.I)
 
 
 def local_target(host):
@@ -63,13 +79,17 @@ TOOLS = [
     {"name": "docker_restart", "description": "Restart a container (needed after a config change)", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "read_config", "description": "Read victim/conf.d/default.conf", "parameters": {"type": "object", "properties": {}}},
     {"name": "write_config", "description": "Replace victim/conf.d/default.conf with the given full content, then restart edge-victim is still required", "parameters": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
-    {"name": "search_runbooks", "description": "Search the IT runbooks for a symptom (502 upstream, nginx emerg config, disk full, oom, crash loop); returns the best matches, or the catalogue if nothing matches", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "search_runbooks", "description": "Search the IT runbooks for a symptom in your own words or with the exact error text (502 upstream, nginx emerg config, disk full, exit 137, crash loop); returns the best matching procedures, or the catalogue if nothing matches", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "disk_usage", "description": "Host filesystem usage (df) and docker disk usage; use for disk-full symptoms", "parameters": {"type": "object", "properties": {}}},
     {"name": "service_status", "description": "Whether a host systemd unit is active, plus its last status line (read-only)", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}}, "required": ["unit"]}},
     {"name": "journal_tail", "description": "Last lines of a host systemd unit's journal", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}, "lines": {"type": "integer", "default": 30}}, "required": ["unit"]}},
     {"name": "port_check", "description": "Whether a TCP port accepts connections", "parameters": {"type": "object", "properties": {"host": {"type": "string", "default": "127.0.0.1"}, "port": {"type": "integer"}}, "required": ["port"]}},
     {"name": "http_check", "description": "GET an http(s) URL on this host or the private network and return the status code and the first bytes of the body", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "top_processes", "description": "Top host processes by CPU with memory usage", "parameters": {"type": "object", "properties": {}}},
+    {"name": "recreate_stack", "description": "Recreate a container of this stack that no longer exists at all (docker rm). Start/restart first if it merely exited", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}}},
+    {"name": "network_repair", "description": "Make sure the stack network exists and both containers are attached to it; use when the front end cannot resolve or reach the upstream", "parameters": {"type": "object", "properties": {}}},
+    {"name": "cleanup_disk", "description": "Free space by deleting this project's own old log files (never images, volumes, or anyone else's data)", "parameters": {"type": "object", "properties": {}}},
+    {"name": "kill_process", "description": "Terminate a runaway host process by pid; only processes owned by this user and not part of the platform itself", "parameters": {"type": "object", "properties": {"pid": {"type": "integer"}, "force": {"type": "boolean", "default": False}}, "required": ["pid"]}},
     {"name": "finish", "description": "End the run with a verdict", "parameters": {"type": "object", "properties": {"status": {"type": "string", "enum": ["resolved", "unresolved", "escalate"]}, "root_cause": {"type": "string"}, "actions": {"type": "string"}}, "required": ["status", "root_cause", "actions"]}},
 ]
 
@@ -91,26 +111,9 @@ def http_status(url):
 
 
 def search_runbooks(query):
-    """Title-weighted keyword retrieval over the runbooks.
-
-    Plain body overlap favours whichever runbook is longest, which is the wrong answer as the set grows; the title
-    says what a runbook is *for*, so it counts triple, and a shorter body breaks ties. A query that matches nothing
-    returns the catalogue rather than an empty string, so the agent always learns what exists.
-    """
-    terms = set(re.findall(r"[a-z0-9]+", query.lower()))
-    docs = []
-    for f in sorted(RUNBOOKS.glob("*.md")):
-        text = f.read_text()
-        title = text.splitlines()[0] if text else f.stem
-        title_words = set(re.findall(r"[a-z0-9]+", (f.stem + " " + title).lower()))
-        body_words = set(re.findall(r"[a-z0-9]+", text.lower()))
-        docs.append((3 * len(terms & title_words) + len(terms & body_words), -len(body_words), f.name, text))
-    docs.sort(reverse=True)
-    hits = [d for d in docs if d[0]]
-    if not hits:
-        return "no runbook matched. Available runbooks:\n" + "\n".join(
-            f"- {n}: {t.splitlines()[0].lstrip('# ')}" for *_, n, t in docs)
-    return "\n\n".join(f"## {n}\n{t.strip()[:1500]}" for *_, n, t in hits[:2])
+    """Retrieval lives in scripts/rag.py: hybrid keyword + dense, with its own fallback when the index is absent."""
+    import rag
+    return rag.search(query)
 
 
 def run_tool(name, args, dry_run):
@@ -145,6 +148,8 @@ def run_tool(name, args, dry_run):
         return "error: port_check needs args.port"
     if name == "http_check" and "url" not in args:
         return "error: http_check needs args.url"
+    if name == "kill_process" and "pid" not in args:
+        return "error: kill_process needs args.pid (from top_processes)"
 
     def guard(n):
         if n not in NAMES:
@@ -216,6 +221,64 @@ def run_tool(name, args, dry_run):
             return f"unreachable ({type(e).__name__})"
     if name == "top_processes":
         return sh("ps -eo pid,comm,pcpu,pmem,rss --sort=-pcpu | head -16")
+    if name == "recreate_stack":
+        import faults                                   # one definition of the containers, shared with the harness
+        targets = [args["name"]] if args.get("name") else sorted(faults.SPECS)
+        for t in targets:
+            if t not in faults.SPECS:
+                return f"denied: {t!r} is not part of this stack"
+        if dry_run:
+            return f"DRY-RUN: would recreate {targets}"
+        out = [faults.ensure(t) for t in targets]
+        time.sleep(2)
+        return "\n".join(out) + "\n" + sh("docker ps -a --filter name=edge-victim --format '{{.Names}}\t{{.Status}}'")
+    if name == "network_repair":
+        import faults
+        if dry_run:
+            return "DRY-RUN: would attach both containers to the stack network"
+        sh(f"docker network create {faults.NET} 2>/dev/null")
+        out = []
+        for c in sorted(NAMES):
+            joined = faults.NET in sh(f"docker inspect {c} --format '{{{{json .NetworkSettings.Networks}}}}'")
+            out.append(f"{c}: already on {faults.NET}" if joined
+                       else f"{c}: " + (sh(f"docker network connect {faults.NET} {c}") or f"attached to {faults.NET}"))
+        return "\n".join(out)
+    if name == "cleanup_disk":
+        now, victims = time.time(), []
+        for pattern in CLEANUP_GLOBS:
+            for f in glob.glob(pattern):
+                if os.path.isfile(f) and now - os.path.getmtime(f) > CLEANUP_MIN_AGE_S:
+                    victims.append((f, os.path.getsize(f)))
+        freed = sum(n for _, n in victims)
+        if dry_run:
+            return f"DRY-RUN: would delete {len(victims)} project log file(s), {freed / 1e6:.1f} MB"
+        for f, _ in victims:
+            try:
+                os.remove(f)
+            except OSError as e:
+                return f"stopped after an error on {f}: {e}"
+        usage = shutil.disk_usage("/")
+        return (f"deleted {len(victims)} project log file(s), freed {freed / 1e6:.1f} MB; "
+                f"/ is now {100 * usage.used / usage.total:.0f}% full with {usage.free / 1e9:.0f} GB free. "
+                "Images and volumes were not touched: report disk pressure instead of deleting shared data.")
+    if name == "kill_process":
+        pid = int(args["pid"])
+        if pid in (os.getpid(), os.getppid(), 1):
+            return "denied: that pid is this agent or init"
+        info = sh(f"ps -o uid=,args= -p {pid}").strip()
+        if not info or "exit " in info:
+            return f"no such process: {pid}"
+        uid, cmd = info.split(None, 1)
+        if int(uid) != os.getuid():
+            return f"denied: pid {pid} belongs to uid {uid}, not this agent"
+        if PROTECTED_CMD.search(cmd):
+            return f"denied: pid {pid} is part of the platform ({cmd[:120]})"
+        if dry_run:
+            return f"DRY-RUN: would signal {pid} ({cmd[:80]})"
+        sig = "-9" if args.get("force") else "-15"
+        sh(f"kill {sig} {pid}")
+        time.sleep(1)
+        return f"signalled {pid} with {sig} ({cmd[:80]}); " + ("still running" if sh(f"ps -p {pid} -o pid=").strip() else "gone")
     return f"unknown tool {name}"
 
 
