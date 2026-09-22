@@ -20,7 +20,19 @@ import agent  # noqa: E402  (reuses TOOLS and run_tool)
 
 LOG = pathlib.Path(__file__).resolve().parent.parent / "logs" / "ops-api.log"
 LOG.parent.mkdir(exist_ok=True)
-TOOLS = [t for t in agent.TOOLS if t["name"] != "finish"]
+TOOLS = [t for t in agent.TOOLS if t["name"] != "finish"] + [{
+    "name": "self_heal",
+    "description": "Run the full autonomous diagnose-and-repair loop on the host (same model, same tools, up to 8 steps) and return its verdict and step log. Use this when you cannot drive the individual tools yourself.",
+    "parameters": {"type": "object", "properties": {"note": {"type": "string", "description": "optional context for the run"}}},
+}]
+
+
+def self_heal(args):
+    import subprocess
+    env = dict(os.environ, VLLM_URL=os.environ.get("VLLM_URL", "http://127.0.0.1:8001"), SERVED_NAME=os.environ.get("SERVED_NAME", "edge-agent"))
+    r = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parent / "agent.py"), "--case", "self-heal", "--max-steps", "8"],
+                       capture_output=True, text=True, timeout=900, env=env, cwd=str(pathlib.Path(__file__).resolve().parent.parent))
+    return (r.stdout + r.stderr).strip()[-3000:]
 
 
 class H(BaseHTTPRequestHandler):
@@ -54,7 +66,7 @@ class H(BaseHTTPRequestHandler):
                 return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": f"unknown tool {name}"}}
             t0 = time.time()
             try:
-                result, is_err = agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1"), False
+                result, is_err = (self_heal(args) if name == "self_heal" else agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1")), False
             except Exception as e:  # a tool bug must come back as a tool error, never as a dropped connection
                 result, is_err = f"tool {name} raised {type(e).__name__}: {e}", True
             if not is_err and isinstance(result, str) and result.startswith(("error:", "denied:", "bad arguments")):
@@ -95,7 +107,7 @@ class H(BaseHTTPRequestHandler):
             return self._send(400, {"error": f"unknown tool {name}"})
         t0 = time.time()
         try:
-            result = agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1")
+            result = self_heal(args) if name == "self_heal" else agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1")
         except Exception as e:
             result = f"tool {name} raised {type(e).__name__}: {e}"
         with LOG.open("a") as f:
