@@ -1,4 +1,4 @@
-# Plan: TensorRT-LLM inference + NemoClaw agent layer (drafted 2026-09-22, not executed)
+# Plan: TensorRT-LLM inference + NemoClaw agent layer (drafted 2026-09-22; TRT-LLM part executed the same day)
 
 Why: a compliance requirement to serve with TensorRT(-LLM) and to run the agent on NVIDIA NemoClaw. Everything stays
 on the Spark (edge, offline-capable); only the serving engine and the agent runtime change. Client code is unaffected
@@ -60,3 +60,29 @@ NEMOCLAW_COMPATIBLE_AUTH_MODE=none NEMOCLAW_REASONING=true nemoclaw onboard --no
 ```
 Expected: single-stream decode around the model's base speed (no MTP on TRT-LLM/Spark), roughly 40–50 tok/s class for a
 3B-active MoE; measure with `vllm bench serve` pointed at :8355 before switching the agent over.
+
+## Execution log (2026-09-22)
+1. Pulled `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc13` (35.6 GB) and `nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4`.
+   Server started (health in 130 s) but every request failed with `PreTrainedTokenizerFast has no attribute tokenizer`
+   (`openai_server.py` expects TRT-LLM's `TransformersTokenizer` wrapper; the Omni/multimodal path hands it the raw HF
+   tokenizer). Dropped the Omni checkpoint; the agent is text-only anyway.
+2. Switched to the text-only `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4` (19.3 GB). Requests then failed with
+   `'NoneType' object has no attribute 'tokenizer'`: with `HF_HUB_OFFLINE=1` TRT-LLM's tokenizer loader calls the HF
+   API (`Failed to load hf tokenizer ... Cannot reach https://huggingface.co/api/models/...`) and silently leaves the
+   tokenizer unset. Fix in `scripts/serve-trt.sh`: pass `--tokenizer <cached snapshot dir>`; weights already load
+   offline. Also set `--served_model_name edge-agent` so clients see the same id as with vLLM.
+3. kubelet image GC deleted the 35 GB TRT-LLM image while the container was restarting (disk was at 88–90 %, above
+   the 85 % threshold, `imageMinimumGCAge: 0s`). Freed disk: removed the stopped `qwen3-server` container (its
+   `docker inspect` is saved in `logs/qwen3-server.inspect.json`) and image, the stopped throwaway vLLM containers and
+   images, the Omni checkpoint and the DFlash drafters. Disk at 85 % afterwards; the durable fix is to stop kubelet.
+4. Default `max_num_tokens=8192` with chunked prefill off rejected the 12.9k-token RAG prompt; `trt/nano.yaml` now sets
+   `max_seq_len: 32768`, `enable_chunked_prefill: true`.
+5. First working numbers (before item 4, text-only NVFP4, no speculative decoding): health in 106 s, single stream
+   57.9 tok/s, 8 concurrent 233 tok/s aggregate, smoke (tool call) OK. GPU 33.5 GiB.
+6. With the YAML fix (text-only NVFP4, `--served_model_name edge-agent`, no speculative decoding): health 106 s,
+   single stream 57.9 tok/s, 8 concurrent 237 tok/s, prefill 11,025 tok/s (12.9k-token prompt in 1.17 s; block reuse
+   is off so there is no prefix-cache benefit), long-context decode 41.7 tok/s, thinking 58.4 tok/s, GPU 34 GiB.
+   Smoke (tool call) OK. **Needle probe 5/8** in both thinking modes (Qwen3.6-35B-A3B and Qwen3.8-27B scored 8/8):
+   Nemotron-3-Nano confuses details across near-identical runbook lines. Mitigations: real retrieval (few candidates
+   in context) instead of dumping the whole corpus, or a stronger TRT-LLM-validated model (Nemotron-3-Super-120B-A12B
+   NVFP4, gpt-oss-120b MXFP4) at lower speed.

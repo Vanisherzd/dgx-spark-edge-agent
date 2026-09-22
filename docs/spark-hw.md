@@ -12,7 +12,7 @@
 | FlashInfer JIT | keep `MAX_JOBS=4 FLASHINFER_NVCC_THREADS=4`; default ninja parallelism OOM-hangs the box on unified memory (happened 2026-09-22) |
 | Python | system 3.12.3 **without headers** (`python3.12-dev` missing → Triton JIT fails). Project uses uv-managed CPython 3.12.14 (`python-preference = only-managed`) |
 | Docker | 29.1.3, user `hsnl` in `docker` group; NVIDIA runtime is the default runtime |
-| k8s | node in the lab cluster (kubelet, flannel, HAMi webhook). Cordoned 2026-09-21 so no new pods land here |
+| k8s | node in the lab cluster (kubelet, flannel, HAMi webhook). Cordoned 2026-09-21 so no new pods land here. **kubelet image GC** (`imageMinimumGCAge: 0s`, default high threshold 85 % disk) deletes any docker image not used by a running container once `/` is above 85 %: it removed the 35 GB TensorRT-LLM image on 2026-09-22 between two container restarts. Keep `/` below ~80 % or stop kubelet |
 | Ollama | systemd service active on :11434, no models loaded |
 | sudo | needs password (all project pieces run as user: uv, docker, `systemctl --user`, Linger=yes) |
 

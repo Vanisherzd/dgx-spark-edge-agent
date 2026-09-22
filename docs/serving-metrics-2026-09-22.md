@@ -48,3 +48,16 @@ Datasets: `random` (synthetic token ids, worst case for speculative decoding) an
 Caveats: 150/100 samples give ±2–4 pt confidence intervals; IFEval ran with thinking on and a 4096-token cap, so a
 few answers may have been cut off inside the reasoning (counts as a miss). Runtime on this server: GSM8K 19.5 min,
 IFEval 24 min at 8 concurrent requests. Results JSON: `logs/lm-eval/edge-agent/`.
+
+## TensorRT-LLM (same scripts), `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4`, trtllm-serve 1.3.0rc13, :8355
+| metric | value |
+|---|---|
+| startup to healthy | 106 s |
+| single stream (bench.py, 256 tokens) | 57.9 tok/s |
+| 8 concurrent | 237 tok/s aggregate (29.6 per stream) |
+| prefill, 12.9k-token prompt | 11,025 tok/s (1.17 s), no prefix cache (block reuse off) |
+| long-context decode | 41.7 tok/s |
+| thinking on | 58.4 tok/s |
+| needle probe | 5/8 (thinking off) / 5/8 (thinking on) |
+| GPU memory | 34 GiB (`free_gpu_memory_fraction: 0.5`) |
+No speculative decoding on this path yet. See `docs/plan-trtllm-nemoclaw.md` for the setup and the issues fixed.
