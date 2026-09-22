@@ -39,3 +39,21 @@ Timing on the lab Spark: image pull 5 min, model 3 min, server to healthy 2 min,
 `scripts/nemoclaw-drill.sh <case>` prints the agent's report, the health verification and the ops-API call log
 (`logs/ops-api.log`: every tool the sandbox agent invoked, with args and results). Cases: nginx-stopped, bad-config,
 upstream-down. New cases: add an `inject` branch in `scripts/faults.py` and a runbook in `runbooks/`.
+
+## If the machine is a Jetson instead of a DGX Spark
+Detect: `cat /etc/nv_tegra_release` exists on Jetson; `nvidia-smi --query-gpu=name,compute_cap --format=csv` (or `tegrastats`);
+`free -g`; `docker info --format '{{.Runtimes}}'` must list `nvidia`.
+
+| | Spark | AGX Thor (JetPack 7, sm_110) | AGX Orin 64 GB (JetPack 6, sm_87) | Orin Nano Super 8 GB |
+|---|---|---|---|---|
+| NVFP4 / FP8 | yes | yes | no (INT8/INT4 only) | no |
+| Nemotron-3-Nano-30B-A3B-NVFP4 | 58 tok/s (TRT-LLM) | fits; community vLLM figure 65.7 tok/s, ITL 14 ms | does not fit / no FP4 | no |
+| engine | trtllm-serve NGC | TensorRT Edge-LLM (JetPack 7.1, open source) is NVIDIA's TensorRT path; trtllm-serve SBSA image untested on Tegra; vLLM from jetson-containers (r38) as fallback | vLLM (jetson-containers r36) or llama.cpp | llama.cpp / Ollama |
+| model fallback | - | same model | Nemotron-Nano-9B-v2, Qwen3-8B/14B AWQ | Nemotron-3-Nano-4B GGUF |
+| NemoClaw | works | sandbox GPU proof fails (OpenShell Landlock vs non-root CUDA); onboard with `NEMOCLAW_SANDBOX_GPU=0` (inference is external anyway) | same, plus JetPack 6 CDI issues | community guides only |
+| repo changes | - | `IMAGE`, `--runtime nvidia` in serve-trt.sh, memory fraction | model + engine swap (vLLM container), `MAX_JOBS<=2` | replace the serving layer |
+
+Everything above the serving layer (agent loop, ops API, shim, faults harness, runbooks, NemoClaw provider/policy steps)
+is Docker + Python and unchanged. Extra preloads for the bundle: jetson-containers vLLM images (r38 for Thor, r36 for
+Orin), `NVIDIA-Nemotron-3-Nano-4B` (GGUF + BF16), `Qwen3-8B` AWQ, and the TensorRT Edge-LLM source if TensorRT is mandatory
+on a Thor.

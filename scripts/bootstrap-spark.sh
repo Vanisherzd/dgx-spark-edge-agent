@@ -11,6 +11,7 @@ BUNDLE="${BUNDLE:-}"                 # optional dir with trtllm-image.tar and hf
 stage() { echo; echo "=== [$1] $(date +%T)"; }
 
 check() { stage check
+  [ -f /etc/nv_tegra_release ] && { echo "JETSON detected: $(head -1 /etc/nv_tegra_release)"; echo "  -> see docs/hackathon-runbook.md (Jetson section): Thor keeps the model, Orin needs a smaller one; run stages by hand"; }
   nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
   docker info --format 'docker {{.ServerVersion}}' ; command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh -s -- -q
   df -h / | awk 'NR==2{print "disk free:", $4}'
