@@ -26,7 +26,10 @@ image() { stage image
 model() { stage model
   if ls "$HOME/.cache/huggingface/hub/models--${MODEL//\//--}/snapshots/"*/config.json >/dev/null 2>&1; then echo "model cached"
   elif [ -f "$BUNDLE/hf-cache.tar" ]; then mkdir -p "$HOME/.cache/huggingface" && tar -C "$HOME/.cache/huggingface" -xf "$BUNDLE/hf-cache.tar"
-  else uv run hf download "$MODEL"; fi; }
+  else uv run hf download "$MODEL"; fi
+  # retrieval model: 33 MB, CPU only, and the index has to exist before the first incident
+  uv run hf download "${EMBED_MODEL:-BAAI/bge-small-en-v1.5}" >/dev/null 2>&1 || true
+  uv run --no-sync scripts/rag.py build || echo "rag index not built; retrieval falls back to keyword"; }
 
 serve() { stage serve
   mkdir -p logs; HOST=0.0.0.0 nohup scripts/serve-trt.sh > logs/trt-serve.log 2>&1 &

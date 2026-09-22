@@ -8,7 +8,8 @@ replay it. Official stack: TensorRT-LLM (trtllm-serve container) + Nemotron-3-Na
    ```bash
    # on the lab Spark
    docker save nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc13 -o /tmp/bundle/trtllm-image.tar          # 35.6 GB
-   tar -C ~/.cache/huggingface -cf /tmp/bundle/hf-cache.tar hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 hub/blobs   # ~19 GB
+   tar -C ~/.cache/huggingface -cf /tmp/bundle/hf-cache.tar hub/models--nvidia--NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4 \
+       hub/models--BAAI--bge-small-en-v1.5 hub/blobs   # ~19 GB; the second one is the 33 MB retrieval model
    ```
    Put both on an SSD; `BUNDLE=/media/ssd/bundle scripts/bootstrap-spark.sh` uses them instead of pulling.
    NemoClaw's installer and `uv sync` still need network (small downloads).
