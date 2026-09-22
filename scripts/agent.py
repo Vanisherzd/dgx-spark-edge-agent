@@ -46,6 +46,19 @@ PROTECTED_CMD = re.compile(r"sshd?\b|systemd|dockerd|containerd|trtllm|tensorrt|
                            r"ops_api|oai_shim|uv run|/init\b", re.I)
 
 
+def docker_ps():
+    """State of this stack's containers, naming the ones that are absent.
+
+    `docker ps -a` simply omits a container that was removed, so its absence is invisible next to a healthy sibling.
+    An agent then re-reads the same output looking for the difference. Say it outright instead.
+    """
+    listed = dict(line.split("\t", 1) for line in
+                  sh("docker ps -a --filter name=edge-victim --format '{{.Names}}\t{{.Status}}'").splitlines()
+                  if "\t" in line)
+    return "\n".join(f"{n}\t{listed.get(n, 'MISSING (no such container: it was removed, not stopped)')}"
+                      for n in sorted(NAMES))
+
+
 def held_open():
     """Realpaths this user's processes currently have open. Deleting one frees no space until the writer exits, and
     the service keeps logging into a file nobody can read again."""
@@ -170,7 +183,7 @@ def run_tool(name, args, dry_run):
     if name == "check_health":
         return json.dumps({k: http_status(u) for k, u in HEALTH.items()})
     if name == "docker_ps":
-        return sh("docker ps -a --filter name=edge-victim --format '{{.Names}}\t{{.Status}}'")
+        return docker_ps()
     if name == "docker_logs":
         return guard(args["name"]) or sh(f"docker logs --tail {int(args.get('tail', 40))} {args['name']}")
     if name == "docker_exec":
@@ -186,7 +199,7 @@ def run_tool(name, args, dry_run):
             return f"DRY-RUN: would run docker {name.split('_')[1]} {args['name']}"
         out = sh(f"docker {name.split('_')[1]} -t 5 {args['name']}" if name == "docker_restart" else f"docker start {args['name']}")
         time.sleep(2)
-        return out + "\n" + sh("docker ps -a --filter name=edge-victim --format '{{.Names}}\t{{.Status}}'")
+        return out + "\n" + docker_ps()
     if name == "read_config":
         return (CONF_DIR / "default.conf").read_text()
     if name == "write_config":
@@ -244,7 +257,7 @@ def run_tool(name, args, dry_run):
             return f"DRY-RUN: would recreate {targets}"
         out = [faults.ensure(t) for t in targets]
         time.sleep(2)
-        return "\n".join(out) + "\n" + sh("docker ps -a --filter name=edge-victim --format '{{.Names}}\t{{.Status}}'")
+        return "\n".join(out) + "\n" + docker_ps()
     if name == "network_repair":
         import faults
         if dry_run:

@@ -32,8 +32,9 @@ serve() { stage serve
   mkdir -p logs; HOST=0.0.0.0 nohup scripts/serve-trt.sh > logs/trt-serve.log 2>&1 &
   for i in $(seq 1 120); do curl -sf http://127.0.0.1:8000/health >/dev/null 2>&1 && break; sleep 5; done
   curl -sf http://127.0.0.1:8000/health >/dev/null || { echo "server not healthy"; tail -20 logs/trt-serve.log; exit 1; }
-  pgrep -f "scripts/oai_shim[.]py" >/dev/null || nohup uv run --no-sync scripts/oai_shim.py > logs/oai-shim.out 2>&1 &
-  pgrep -f "scripts/ops_api[.]py"  >/dev/null || nohup uv run --no-sync scripts/ops_api.py  > logs/ops-api.out  2>&1 &
+  # setsid, not just nohup: started over ssh, a plain background job dies with the login shell
+  pgrep -f "scripts/oai_shim[.]py" >/dev/null || setsid nohup uv run --no-sync scripts/oai_shim.py > logs/oai-shim.out 2>&1 < /dev/null &
+  pgrep -f "scripts/ops_api[.]py"  >/dev/null || setsid nohup uv run --no-sync scripts/ops_api.py  > logs/ops-api.out  2>&1 < /dev/null &
   sleep 2; VLLM_URL=http://127.0.0.1:8001 uv run --no-sync scripts/smoke.py | tail -1; }
 
 nemoclaw() { stage nemoclaw

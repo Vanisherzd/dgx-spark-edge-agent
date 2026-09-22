@@ -168,6 +168,8 @@ EVAL = [                                            # symptom -> the runbook an 
     ("no space left on device", "disk-full.md"),
     ("filesystem is full", "disk-full.md"),
     ("front end container is down and the site is unreachable", "web-service-down.md"),
+    ("no such container, it is not listed at all", "container-missing.md"),
+    ("someone deleted the container and start fails", "container-missing.md"),
     ("health check connection refused nothing listening", "web-service-down.md"),
     # paraphrases with none of the runbook's own vocabulary: what dense retrieval is supposed to buy us
     ("the web page will not load at all", "web-service-down.md"),
@@ -175,6 +177,7 @@ EVAL = [                                            # symptom -> the runbook an 
     ("we ran out of storage", "disk-full.md"),
     ("the machine ran out of RAM and something was terminated", "oom-killed.md"),
     ("the gateway waits forever for the backend", "upstream-504.md"),
+    ("the front end vanished from the container list", "container-missing.md"),
 ]
 
 
