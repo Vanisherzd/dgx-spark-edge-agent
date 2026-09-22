@@ -56,7 +56,7 @@ Nemotron-3-Nano occasionally typos them. `self_heal` (one MCP call that runs the
 sandbox agent stalls. Run: `logs/nemoclaw-drill-mcp.sh bad-config` (drill script kept in `scripts/nemoclaw-drill.sh`).
 
 ## NemoClaw drill result (2026-09-22 15:41)
-`logs/nemoclaw-drill-mcp.sh bad-config` -> PASS in 2.5 min. The sandbox agent (NemoClaw, OpenClaw runtime, Nemotron via
+`logs/nemoclaw-drill-mcp.sh bad-config` -> PASS in 2.5 min; `upstream-down` -> PASS in 2 min (root cause: app container exited; action: docker_start). The sandbox agent (NemoClaw, OpenClaw runtime, Nemotron via
 TensorRT-LLM) called `ops__self_heal` over MCP; the host loop diagnosed the missing semicolon, rewrote the config,
 restarted the container, verified 200/200; the agent reported root cause / actions / final health. Two routes exist:
 - **self_heal** (one MCP call, reliable): NemoClaw is the interface and orchestrator, the same local model runs the
