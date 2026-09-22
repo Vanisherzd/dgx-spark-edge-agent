@@ -58,13 +58,15 @@ scripts/
   agent.py                      自我修復迴圈：觀察 → 工具呼叫決策 → 動作 → 驗證，JSONL 軌跡在 logs/agent/
   faults.py                     victim 沙箱（兩個 nginx 容器）與錯誤注入：nginx-stopped / bad-config / upstream-down
   nemoclaw-drill.sh             注入錯誤 → 叫 NemoClaw sandbox agent 修 → 驗證 → 印出它呼叫過的工具
-  ops-sandbox-helper.sh         上傳到 sandbox 的 /sandbox/bin/ops（`ops tools` / `ops call <tool> '<json>'`）
+  ops-sandbox-helper.sh         上傳到 sandbox 的 /sandbox/bin/ops（`ops tools` / `ops call <tool> '<json>'`，MCP 之外的後備路徑）
   smoke.py / probe.py           健康+tool call 煙霧測試；8 題 needle 精準度探針
   bench.py / serve-summary.py / bench-summary.py   吞吐測試與結果表
   try.sh                        對任一模型/參數組合：起臨時 server(:8101) → bench → smoke → 關掉
   download.sh                   一次性下載模型到 ~/.cache/huggingface（之後全離線）
   bootstrap-spark.sh            新機器一鍵重建（含 Jetson 偵測）
 skills/ops/SKILL.md             OpenClaw skill，教 sandbox agent 用 ops 指令
+nemoclaw/openclaw-patch.json5   小模型的工具介面設定（關掉 tool search、只留 ops skill、關 heartbeat）
+nemoclaw/workspace/*.md         取代 OpenClaw 預設 bootstrap 的精簡 AGENTS.md / TOOLS.md / HEARTBEAT.md
 runbooks/*.md                   小型 RAG 語料（IT runbook）
 victim/conf.d/                  victim nginx 設定（由 faults.py 產生，不入版控）
 trt/*.yaml                      trtllm-serve 的 extra_llm_api_options（nano.yaml 為正式）
@@ -135,11 +137,17 @@ openshell policy update edge-agent --add-endpoint host.openshell.internal:8790:r
 nemoclaw onboard --resume --non-interactive --yes-i-accept-third-party-software   # 補完第 7、8 步
 nemoclaw edge-agent status                                                     # Inference: healthy
 
-# 給 sandbox agent 工具：shell helper + skill + MCP（只曝露 self_heal）
+# 給 sandbox agent 工具：shell helper + skill + MCP（全部工具，不過濾）
 nemoclaw edge-agent exec -- mkdir -p /sandbox/bin /sandbox/.openclaw/skills/ops
 nemoclaw edge-agent upload scripts/ops-sandbox-helper.sh /sandbox/bin/ops && nemoclaw edge-agent exec -- chmod +x /sandbox/bin/ops
 nemoclaw edge-agent upload skills/ops/SKILL.md /sandbox/.openclaw/skills/ops/     # 目的地給「目錄」，upload 會把檔名路徑當目錄
-openshell sandbox exec -- sh -c 'openclaw mcp add ops --url http://host.openshell.internal:8790/mcp --transport streamable-http --timeout 600 --no-probe; openclaw mcp tools ops --include self_heal; openclaw mcp reload'
+openshell sandbox exec -- sh -c 'openclaw mcp add ops --url http://host.openshell.internal:8790/mcp --transport streamable-http --timeout 600 --no-probe; openclaw mcp tools ops --clear; openclaw mcp reload'
+
+# 小模型的工具介面：不做這步，24 個工具會被藏在 tool_search/tool_describe/tool_call 後面，Nemotron 會一直猜錯 tool id
+nemoclaw edge-agent upload nemoclaw/openclaw-patch.json5 /sandbox/tmp/
+openshell sandbox exec -- sh -c 'openclaw config patch --stdin < /sandbox/tmp/openclaw-patch.json5'
+for f in AGENTS.md TOOLS.md HEARTBEAT.md; do nemoclaw edge-agent upload "nemoclaw/workspace/$f" /sandbox/.openclaw/workspace/; done
+nemoclaw edge-agent gateway restart
 nemoclaw edge-agent agent --agent main --session-id t1 -m "Reply with one word: ready"   # 走 sandbox → gateway → shim → TRT-LLM
 ```
 
@@ -236,13 +244,15 @@ uv run --no-sync scripts/faults.py run bad-config      # reset → inject → ag
 ```bash
 scripts/nemoclaw-drill.sh bad-config        # 注入 → nemoclaw edge-agent agent … → verify → 印 ops-api.log
 ```
-結果：bad-config 2.5 分、upstream-down 2 分、nginx-stopped 3 分，**3/3 PASS**。agent 依 prompt 在殼層執行 `/sandbox/bin/ops call self_heal '{}'`（host 上跑 agent.py 迴圈並回傳步驟與結論），再用 `check_health` 確認，最後回報 root cause / actions / final health。
+prompt 就是值班人員會收到的一句警報，沒有指定任何指令。結果 **3/3 PASS**：bad-config 75 秒 8 次工具呼叫、nginx-stopped 38 秒 6 次、upstream-down 47 秒 5 次。bad-config 那次 agent 自己讀 log、讀設定、重寫、重啟容器，再用 `http_check` 驗兩個 URL。
+
+調整工具介面之前，同樣三個案例需要 prompt 直接寫出 `/sandbox/bin/ops call self_heal '{}'` 才會過，各花 2 到 3 分鐘。原因與修法見 `docs/agent-design.md` 的「Tool surface tuning」。
 
 ## 7. 新增你自己的錯誤注入案例
 
 1. `scripts/faults.py` 的 `inject()` 加一個分支（例如塞滿 tmpfs、改壞 upstream 名稱、殺掉 DNS）。
 2. `runbooks/` 加一篇對應的 runbook（RAG 語料）。
-3. 若需要新動作，在 `scripts/agent.py` 的 `TOOLS` + `run_tool()` 加白名單工具（ops API 與 MCP 會自動曝露）。
+3. 若需要新動作，在 `scripts/agent.py` 的 `TOOLS` + `run_tool()` 加白名單工具（ops API 與 MCP 會自動曝露）。現成的主機層唯讀工具：`disk_usage`、`service_status`、`journal_tail`、`port_check`、`http_check`、`top_processes`。
 4. `uv run --no-sync scripts/faults.py run <case>` 與 `scripts/nemoclaw-drill.sh <case>` 各跑一次。
 要動 Spark 宿主機的 systemd/docker，把 `run_tool` 的容器白名單換成 host 執行器即可，迴圈與驗證不用改。
 
@@ -261,7 +271,11 @@ scripts/nemoclaw-drill.sh bad-config        # 注入 → nemoclaw edge-agent age
 | Sandbox 預設無 policy | `inference.local` 403 `policy_denied` | `policy add local-inference` |
 | loopback 端點被改寫到 Ollama auth proxy :11435 | 401 | provider `OPENAI_BASE_URL=http://host.openshell.internal:8001/v1`，server 綁 0.0.0.0 |
 | trtllm-serve 嚴格驗證 OpenClaw 訊息 | 400 `string_type`，OpenClaw 顯示 `Message ordering conflict` | `oai_shim.py` |
-| 小模型走 OpenClaw meta 工具層 | id 打錯、arguments 空、字串 `\n` 雙重轉義 | 伺服端容錯；prompt 直接給殼層指令；MCP 只留 `self_heal` |
+| OpenClaw 預設把工具藏在 tool search 後面 | 模型一直猜 tool id（`check_health`、`taskflow-inbox-triage`），整回合白費 | `tools.toolSearch: false` + `mcp tools ops --clear`，工具直接進請求 |
+| 預設 prompt 塞 16 個無關 skill 與通用助理指令 | system prompt 28.9k 字元，小模型分心 | `agents.defaults.skills: ["ops"]` + 精簡 `AGENTS.md`，降到 16.9k |
+| Heartbeat 每 30 分打一次模型 | 空轉、每次重抓 MCP catalog、製造錯誤紀錄 | `agents.defaults.heartbeat.every: "0m"` + 註解-only 的 `HEARTBEAT.md` |
+| 模型把 tool call 寫在 `<think>` 裡且沒關 tag | `Agent couldn't generate a response`，故障沒修 | shim 緩衝串流，空回合才從 reasoning 救回 tool call |
+| 小模型走 OpenClaw meta 工具層 | id 打錯、arguments 空、字串 `\n` 雙重轉義 | 伺服端容錯；MCP 不過濾工具 |
 | `nemoclaw upload` 目的地 | 把檔名路徑當目錄 | 目的地給目錄 |
 | `openshell sandbox exec` / `nemoclaw exec` 吃 stdin | heredoc 腳本後半段被吞 | 一律 `</dev/null` |
 
@@ -274,7 +288,8 @@ scripts/nemoclaw-drill.sh bad-config        # 注入 → nemoclaw edge-agent age
 - TRT-LLM API 綁 0.0.0.0 無認證（NemoClaw 直連需要）：lab LAN 可達，要收就用 iptables 只放 172.24.0.0/16。
 - `~/.nemoclaw.bak-2026-09-22/credentials.json` 內有舊的 NVIDIA API key；`hsnl` 密碼曾出現在對話中 → 都建議更換。
 - HF cache 還留著 ~35 GB 未完成的 `nvidia/Qwen3.6-35B-A3B-NVFP4`（NemoClaw express 誤下載），`hf cache rm model/nvidia/Qwen3.6-35B-A3B-NVFP4` 可清。
-- 待做：RAG 真正的檢索器（Nemotron 在整包語料塞 prompt 時抓細節較弱）、host 級別動作的執行器、更多錯誤注入案例。
+- `http_check` / `port_check` 只允許 loopback 與私有網段，避免 ops API 變成對外探測工具。
+- 待做：RAG 真正的檢索器（Nemotron 在整包語料塞 prompt 時抓細節較弱）、host 級別**動作**（目前只有唯讀診斷）的執行器、更多錯誤注入案例。
 
 ## 11. 文件索引
 

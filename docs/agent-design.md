@@ -69,6 +69,71 @@ meta-tool ids (`tool_describe ops`, `tool_describe healthcheck`) and gave up twi
 command (`/sandbox/bin/ops call self_heal "{}"`) as step 1 and lists manual `ops call` commands as the fallback, it
 executes it every time. `scripts/nemoclaw-drill.sh` carries that prompt.
 
+## Tool surface tuning (2026-09-22 22:41) — the sandbox agent's tool calling was an OpenClaw config problem
+
+The sandbox agent kept failing tool calls, so we read the evidence instead of the symptom: the in-sandbox session
+trajectories (`/sandbox/.openclaw/agents/main/sessions/*.jsonl`), the gateway log, and `openclaw.json`.
+
+What the evidence showed:
+
+| Finding | Evidence |
+| --- | --- |
+| All 24 tools hidden behind `tool_search` / `tool_describe` / `tool_call` | gateway log: `tool-search: cataloged 24 tools behind compact prompt surface`; a drill turn spent 5 `tool_search` calls, then `tool_call {"id":"check_health"}` -> `Unknown tool id` |
+| The ops MCP server filtered down to `self_heal` | `mcp.servers.ops.toolFilter.include: ["self_heal"]` — the other nine tools were reachable only as a shell string |
+| System prompt 28,859 chars (~9.6k tokens) of mostly irrelevant instructions | 16 visible skills (meme-maker, notion, weather, taskflow, tmux...), a 7.2 KB `AGENTS.md` telling the agent to check email and the weather |
+| A heartbeat model call every 30 minutes with nothing to do | four turns per two hours, each refreshing the MCP catalog; one of them burned 4 `tool_describe` calls on `taskflow-inbox-triage` |
+| Model's thinking mode not enabled on the OpenClaw path | `agent.py` sends `chat_template_kwargs.enable_thinking`; OpenClaw has no way to send it |
+
+Changes (`nemoclaw/openclaw-patch.json5`, applied with `openclaw config patch --stdin`):
+
+- `tools.toolSearch: false`, `tools.profile: "minimal"`, `tools.alsoAllow: ["bundle-mcp", "exec", "read"]` — 19 direct
+  tools in the request instead of three meta-tools over a hidden catalog.
+- `openclaw mcp tools ops --clear` — every ops tool is a first-class tool again.
+- `agents.defaults.skills: ["ops"]` — 16 visible skills to 1.
+- `agents.defaults.experimental.localModelLean: true` — OpenClaw's own switch for small local backends.
+- `agents.defaults.heartbeat.every: "0m"` plus a comments-only `HEARTBEAT.md`.
+- `nemoclaw/workspace/AGENTS.md`: 7.2 KB of generic assistant advice replaced by 1.5 KB of stack facts and procedure.
+- `scripts/oai_shim.py` enables thinking for every request and drops `reasoning_effort`, which TensorRT-LLM rejects.
+- `scripts/agent.py` gained six read-only host diagnostics (`disk_usage`, `service_status`, `journal_tail`,
+  `port_check`, `http_check`, `top_processes`) so fault cases outside the two containers have tools; `ops_api.py`
+  re-exports them, so the host loop, the HTTP API and MCP all gained them at once. `http_check` and `port_check`
+  resolve the target and refuse anything outside loopback and the private ranges.
+
+Result — the drill prompt no longer names a command, it is what an on-call human would get
+("Alert: the web stack is degraded. Diagnose it and repair it with your ops tools, then verify both health URLs
+return 200. Report root cause, actions taken, and final health."):
+
+| Case | Before (prompt naming the exact shell command, via `self_heal`) | After (plain alert, agent drives the tools) |
+| --- | --- | --- |
+| bad-config | PASS, 2.5 min | PASS, 75 s, 8 tool calls |
+| nginx-stopped | PASS, 3 min | PASS, 38 s, 6 tool calls |
+| upstream-down | PASS, 2 min | PASS, 47 s, 5 tool calls |
+
+System prompt 28,859 -> 16,904 chars. No `tool_search` call, no invented tool id, no `self_heal` fallback in any of
+the three runs. On bad-config the agent read the logs, read the config, rewrote it, restarted the container, and then
+verified with `http_check` on both URLs by itself.
+
+### Broken thought: tool calls that land in the thinking channel
+
+One drill turn returned `Agent couldn't generate a response` with the fault unrepaired. The session transcript shows
+the model wrote the chat template's own tool-call syntax **inside** its thinking block and never closed `<think>`:
+
+```
+thinking: We see edge-victim exited. Need to investigate why it exited. Check logs.
+<tool_call> <function=ops__docker_logs> <parameter=name> edge-victim </parameter> ... </tool_call>
+```
+
+TensorRT-LLM's `nano-v3` reasoning parser files that whole block as `reasoning_content`, so the `qwen3_coder` tool
+parser never sees it and the turn arrives empty (`stopReason=stop`, `payloads=0`). The parsers are correctly matched —
+the Nemotron chat template does use the `<tool_call><function=…><parameter=…>` form — this is the model leaving a
+thought open, which the template's own comments call out ("allow downstream logic to take care of broken thought").
+
+`scripts/oai_shim.py` is that downstream logic: it buffers the SSE stream, replays it byte for byte when the turn is
+normal, and only synthesizes `tool_calls` when the turn is empty and the reasoning channel holds a parseable call.
+It has a four-case self-check in the commit. **It did not fire in the three passing drills** (0 salvage events in
+`logs/oai-shim.log`), so the failure is intermittent, not systematic: treat the shim recovery as insurance, not as the
+reason the drills now pass.
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.
