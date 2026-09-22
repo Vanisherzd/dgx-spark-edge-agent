@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import re
+import socket
 import subprocess
 import time
 import urllib.request
@@ -23,6 +24,7 @@ RUNBOOKS = ROOT / "runbooks"
 NAMES = {"edge-victim", "edge-victim-app"}
 HEALTH = {"front": "http://127.0.0.1:8880/", "api": "http://127.0.0.1:8880/api/"}
 EXEC_ALLOW = ("nginx -t", "nginx -T", "cat ", "ls", "ps", "curl", "df", "du", "tail", "head", "grep", "id", "env")
+UNIT_RE = re.compile(r"^[A-Za-z0-9@._:-]{1,64}$")          # systemd unit / journal identifier
 BASE = os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
 MODEL = os.environ.get("SERVED_NAME", "edge-agent")
 THINK = os.environ.get("AGENT_THINK", "1") == "1"
@@ -30,6 +32,8 @@ THINK = os.environ.get("AGENT_THINK", "1") == "1"
 SYSTEM = f"""You are an autonomous IT operations agent keeping a small web stack healthy.
 Environment: docker container `edge-victim` (nginx front-end, health URLs {HEALTH['front']} and {HEALTH['api']}) and
 `edge-victim-app` (upstream behind /api/). The nginx config lives on the host at victim/conf.d/default.conf.
+Host-level read-only diagnostics are also available (disk_usage, service_status, journal_tail, port_check, http_check,
+top_processes) for faults that are not inside the containers.
 Rules: gather evidence first (health, container states, logs, config test), consult runbooks, then apply the least
 invasive fix, then verify with check_health. Never touch anything outside these two containers and that config
 directory. Call `finish` once both health URLs return 200 or when you cannot fix it (status=escalate)."""
@@ -44,6 +48,12 @@ TOOLS = [
     {"name": "read_config", "description": "Read victim/conf.d/default.conf", "parameters": {"type": "object", "properties": {}}},
     {"name": "write_config", "description": "Replace victim/conf.d/default.conf with the given full content, then restart edge-victim is still required", "parameters": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
     {"name": "search_runbooks", "description": "Keyword search over the runbooks; returns the best matching ones", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "disk_usage", "description": "Host filesystem usage (df) and docker disk usage; use for disk-full symptoms", "parameters": {"type": "object", "properties": {}}},
+    {"name": "service_status", "description": "Whether a host systemd unit is active, plus its last status line (read-only)", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}}, "required": ["unit"]}},
+    {"name": "journal_tail", "description": "Last lines of a host systemd unit's journal", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}, "lines": {"type": "integer", "default": 30}}, "required": ["unit"]}},
+    {"name": "port_check", "description": "Whether a TCP port accepts connections", "parameters": {"type": "object", "properties": {"host": {"type": "string", "default": "127.0.0.1"}, "port": {"type": "integer"}}, "required": ["port"]}},
+    {"name": "http_check", "description": "GET an http(s) URL and return the status code and the first bytes of the body", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    {"name": "top_processes", "description": "Top host processes by CPU with memory usage", "parameters": {"type": "object", "properties": {}}},
     {"name": "finish", "description": "End the run with a verdict", "parameters": {"type": "object", "properties": {"status": {"type": "string", "enum": ["resolved", "unresolved", "escalate"]}, "root_cause": {"type": "string"}, "actions": {"type": "string"}}, "required": ["status", "root_cause", "actions"]}},
 ]
 
@@ -98,6 +108,15 @@ def run_tool(name, args, dry_run):
         return "error: write_config needs args.content (the full file)"
     if name == "search_runbooks" and "query" not in args:
         return "error: search_runbooks needs args.query"
+    for alias in ("service", "unit_name", "systemd_unit"):         # small models rename this one too
+        if alias in args and "unit" not in args:
+            args["unit"] = args.pop(alias)
+    if name in ("service_status", "journal_tail") and "unit" not in args:
+        return f"error: {name} needs args.unit (a systemd unit name, e.g. docker)"
+    if name == "port_check" and "port" not in args:
+        return "error: port_check needs args.port"
+    if name == "http_check" and "url" not in args:
+        return "error: http_check needs args.url"
 
     def guard(n):
         if n not in NAMES:
@@ -134,6 +153,35 @@ def run_tool(name, args, dry_run):
         return "written; restart edge-victim to apply"
     if name == "search_runbooks":
         return search_runbooks(args["query"]) or "no runbook matched"
+    if name == "disk_usage":
+        return sh("df -h -x tmpfs -x devtmpfs -x efivarfs | head -12") + "\n\n" + sh("docker system df")
+    if name in ("service_status", "journal_tail"):
+        unit = str(args["unit"]).strip()
+        if not UNIT_RE.match(unit):
+            return f"denied: {unit!r} is not a plain unit name"
+        if name == "service_status":
+            return sh(f"systemctl is-active {unit}; systemctl status {unit} --no-pager -n 0 | head -6")
+        return sh(f"journalctl -u {unit} -n {max(1, min(int(args.get('lines', 30)), 200))} --no-pager")
+    if name == "port_check":
+        host, port = str(args.get("host") or "127.0.0.1"), int(args["port"])
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                return f"{host}:{port} open"
+        except Exception as e:
+            return f"{host}:{port} closed ({type(e).__name__})"
+    if name == "http_check":
+        url = str(args["url"])
+        if not url.startswith(("http://", "https://")):
+            return "denied: url must be http(s)"
+        try:
+            with urllib.request.urlopen(url, timeout=5) as r:
+                return f"{r.status}\n{r.read(600).decode(errors='replace')}"
+        except urllib.error.HTTPError as e:
+            return f"{e.code}\n{e.read(600).decode(errors='replace')}"
+        except Exception as e:
+            return f"unreachable ({type(e).__name__})"
+    if name == "top_processes":
+        return sh("ps -eo pid,comm,pcpu,pmem,rss --sort=-pcpu | head -16")
     return f"unknown tool {name}"
 
 

@@ -1,0 +1,19 @@
+// Tool surface for a small local model (Nemotron-3-Nano-30B-A3B, 3B active).
+// Apply inside the sandbox:  openclaw config patch --stdin < nemoclaw/openclaw-patch.json5
+// Why each key: docs/agent-design.md "Tool surface tuning".
+{
+  tools: {
+    // Default was "coding" + tool search: 24 tools hidden behind tool_search/tool_describe/tool_call.
+    // The model kept inventing tool ids ("check_health", "taskflow-inbox-triage") and never reached them.
+    profile: "minimal",                              // session_status only, then add back what this agent needs
+    alsoAllow: ["bundle-mcp", "exec", "read"],       // bundle-mcp = the ops MCP server (host tools)
+    toolSearch: false,                               // tools go straight into the request's tools array
+  },
+  agents: {
+    defaults: {
+      skills: ["ops"],                               // was: 16 visible skills, 15 of them irrelevant (meme-maker, notion, weather...)
+      experimental: { localModelLean: true },        // drops browser/cron/message/image_generate/tts/pdf from the direct surface
+      heartbeat: { every: "0m" },                    // was every 30 min: a model call + MCP catalog refresh with nothing to do
+    },
+  },
+}

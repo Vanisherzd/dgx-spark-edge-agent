@@ -54,8 +54,14 @@ nemoclaw() { stage nemoclaw
   nemoclaw edge-agent upload scripts/ops-sandbox-helper.sh /sandbox/bin/ops >/dev/null 2>&1 && nemoclaw edge-agent exec -- chmod +x /sandbox/bin/ops >/dev/null 2>&1 || true
   # upload treats the destination as a directory: give it the skill directory, not the file path
   nemoclaw edge-agent upload skills/ops/SKILL.md /sandbox/.openclaw/skills/ops/ >/dev/null 2>&1 || true
-  openshell sandbox exec -- sh -c 'openclaw mcp add ops --url http://host.openshell.internal:8790/mcp --transport streamable-http --timeout 600 --connect-timeout 30 --no-probe; openclaw mcp tools ops --include self_heal; openclaw mcp reload' >/dev/null 2>&1 || true
+  # every ops tool as a first-class MCP tool (no --include filter: the model must not need a shell string to reach them)
+  openshell sandbox exec -- sh -c 'openclaw mcp add ops --url http://host.openshell.internal:8790/mcp --transport streamable-http --timeout 600 --connect-timeout 30 --no-probe; openclaw mcp tools ops --clear; openclaw mcp reload' >/dev/null 2>&1 || true
+  # tool surface for a small local model: no tool-search indirection, one skill, no heartbeat (see nemoclaw/openclaw-patch.json5)
+  nemoclaw edge-agent upload nemoclaw/openclaw-patch.json5 /sandbox/tmp/ >/dev/null 2>&1 || true
+  openshell sandbox exec -- sh -c 'openclaw config patch --stdin < /sandbox/tmp/openclaw-patch.json5' >/dev/null 2>&1 || true
+  for f in AGENTS.md TOOLS.md HEARTBEAT.md; do nemoclaw edge-agent upload "nemoclaw/workspace/$f" /sandbox/.openclaw/workspace/ >/dev/null 2>&1 || true; done
   nemoclaw onboard --resume --non-interactive --yes-i-accept-third-party-software || true
+  nemoclaw edge-agent gateway restart >/dev/null 2>&1 || true
   nemoclaw edge-agent status | grep -E "Inference|Policies"; }
 
 victim() { stage victim; uv run --no-sync scripts/faults.py setup; }

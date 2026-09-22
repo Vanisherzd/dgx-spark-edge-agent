@@ -3,7 +3,8 @@
   uv run --no-sync scripts/oai_shim.py      # listens 0.0.0.0:8001 (SHIM_PORT), forwards to UPSTREAM (default http://127.0.0.1:8000)
 
 Normalizations (only on /v1/chat/completions): role "developer" -> "system"; array `content` of text parts -> one string;
-drops fields TensorRT-LLM does not know (`store`, `metadata`). Everything else is passed through unchanged, streaming too.
+drops fields TensorRT-LLM does not know (`store`, `metadata`, `reasoning_effort`); enables the model's thinking mode via
+`chat_template_kwargs` (SHIM_THINK=0 to disable). Everything else is passed through unchanged, streaming too.
 """
 import json
 import os
@@ -11,7 +12,8 @@ import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 UPSTREAM = os.environ.get("UPSTREAM", "http://127.0.0.1:8000").rstrip("/")
-DROP = ("store", "metadata")
+DROP = ("store", "metadata", "reasoning_effort")   # reasoning_effort: TensorRT-LLM does not take it; we set thinking below
+THINK = os.environ.get("SHIM_THINK", "1") == "1"   # Nemotron/Qwen thinking is a chat-template flag, not an API field
 
 
 DEBUG = os.environ.get("SHIM_DEBUG") == "1"
@@ -46,6 +48,10 @@ def normalize(body: dict) -> dict:
             m.clear(); m.update(keep)
     for k in DROP:
         body.pop(k, None)
+    if THINK and "messages" in body:               # same switch scripts/agent.py uses; OpenClaw cannot send it itself
+        kw = body.setdefault("chat_template_kwargs", {})
+        kw.setdefault("enable_thinking", True)
+        kw.setdefault("thinking", True)
     if DEBUG:
         with open(os.path.join(os.path.dirname(__file__), "..", "logs", "oai-shim.log"), "a") as f:
             f.write(json.dumps({"messages": shapes, "tools": len(body.get("tools") or []), "stream": body.get("stream"),
