@@ -49,5 +49,18 @@ Qwen3 thinking mode is on by default; pass `extra_body={"chat_template_kwargs": 
 `docs/serving-metrics-2026-09-22.md` (TTFT/TPOT/ITL/E2E at 1–16 concurrency, GSM8K 92.7 %, IFEval 78 %, needle 8/8).
 TensorRT-LLM + NemoClaw migration: `docs/plan-trtllm-nemoclaw.md`.
 
+## Run the production stack (TensorRT-LLM + NemoClaw), nothing autostarts
+```bash
+cd ~/edge-agent
+HOST=0.0.0.0 nohup scripts/serve-trt.sh > logs/trt-serve.log 2>&1 &   # ~2 min to /health; refuses to restart a healthy server (FORCE=1 overrides)
+curl -sf http://127.0.0.1:8000/health && echo up
+nemoclaw edge-agent status                                             # Inference: healthy
+nemoclaw edge-agent agent --agent main -m "..."                        # one agent turn through the sandbox
+docker stop trtllm-edge                                                # stop the server
+```
+The sandbox reaches the server through `inference.local` -> `http://host.openshell.internal:8000/v1`, which is why the
+server binds 0.0.0.0. Pitfalls and fixes: `docs/plan-trtllm-nemoclaw.md`. Fault-injection drills: `uv run --no-sync
+scripts/faults.py run <nginx-stopped|bad-config|upstream-down>` (see `docs/agent-design.md`).
+
 ## Next (Phase 2)
 RAG store + embedding model, remediation tools, bigger model swap (same alias, clients unchanged).
