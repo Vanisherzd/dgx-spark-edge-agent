@@ -1,0 +1,13 @@
+# extra_llm_api_options for trtllm-serve on the DGX Spark (NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4, text-only).
+# free_gpu_memory_fraction is a share of the *free* memory at startup; 0.5 leaves room for OpenShell/NemoClaw and RAG.
+# Without chunked prefill TRT-LLM rejects prompts longer than max_num_tokens (default 8192), so RAG prompts need both.
+max_seq_len: 32768
+max_num_tokens: 8192
+enable_chunked_prefill: true
+max_batch_size: 8
+kv_cache_config:
+  enable_block_reuse: true
+  free_gpu_memory_fraction: 0.5
+  mamba_ssm_cache_dtype: float32
+cuda_graph_config:
+  enable_padding: true
