@@ -67,7 +67,7 @@ scripts/
 skills/ops/SKILL.md             OpenClaw skill，教 sandbox agent 用 ops 指令
 nemoclaw/openclaw-patch.json5   小模型的工具介面設定（關掉 tool search、只留 ops skill、關 heartbeat）
 nemoclaw/workspace/*.md         取代 OpenClaw 預設 bootstrap 的精簡 AGENTS.md / TOOLS.md / HEARTBEAT.md
-runbooks/*.md                   小型 RAG 語料（IT runbook）
+runbooks/*.md                   小型 RAG 語料（IT runbook，8 篇：服務掛掉、設定錯、502、504、上游名稱解析、crash loop、OOM、磁碟滿）
 victim/conf.d/                  victim nginx 設定（由 faults.py 產生，不入版控）
 trt/*.yaml                      trtllm-serve 的 extra_llm_api_options（nano.yaml 為正式）
 systemd/*.service               user unit（目前刻意不啟用開機自啟）
@@ -244,7 +244,16 @@ uv run --no-sync scripts/faults.py run bad-config      # reset → inject → ag
 ```bash
 scripts/nemoclaw-drill.sh bad-config        # 注入 → nemoclaw edge-agent agent … → verify → 印 ops-api.log
 ```
-prompt 就是值班人員會收到的一句警報，沒有指定任何指令。結果 **3/3 PASS**：bad-config 75 秒 8 次工具呼叫、nginx-stopped 38 秒 6 次、upstream-down 47 秒 5 次。bad-config 那次 agent 自己讀 log、讀設定、重寫、重啟容器，再用 `http_check` 驗兩個 URL。
+prompt 就是值班人員會收到的一句警報，沒有指定任何指令。三個案例各跑兩輪加上一個沒演練過的新故障，**7/7 PASS**，全程沒用 `tool_search` 也沒退回 `self_heal`。
+
+| 案例 | 第一輪 | 第二輪 | 工具呼叫數 |
+|---|---|---|---|
+| bad-config | PASS 75 秒 | PASS 55 秒 | 8 |
+| nginx-stopped | PASS 38 秒 | PASS 50 秒 | 6、7 |
+| upstream-down | PASS 47 秒 | PASS 62 秒 | 5、7 |
+| bad-upstream-name（新） | PASS 70 秒 | – | 9 |
+
+前三個案例六輪都沒查 runbook，光靠 `check_health` → `docker_ps` → `docker_logs` 就解掉。新故障（`proxy_pass` 指到不存在的主機）才真的用到書面資料：agent 讀完 log 與設定後呼叫 `search_runbooks {"query":"host not found in upstream"}`，拿到對應 runbook 再修好。
 
 調整工具介面之前，同樣三個案例需要 prompt 直接寫出 `/sandbox/bin/ops call self_heal '{}'` 才會過，各花 2 到 3 分鐘。原因與修法見 `docs/agent-design.md` 的「Tool surface tuning」。
 
@@ -254,6 +263,9 @@ prompt 就是值班人員會收到的一句警報，沒有指定任何指令。�
 2. `runbooks/` 加一篇對應的 runbook（RAG 語料）。
 3. 若需要新動作，在 `scripts/agent.py` 的 `TOOLS` + `run_tool()` 加白名單工具（ops API 與 MCP 會自動曝露）。現成的主機層唯讀工具：`disk_usage`、`service_status`、`journal_tail`、`port_check`、`http_check`、`top_processes`。
 4. `uv run --no-sync scripts/faults.py run <case>` 與 `scripts/nemoclaw-drill.sh <case>` 各跑一次。
+現成案例：`nginx-stopped`、`bad-config`、`upstream-down`、`bad-upstream-name`。
+
+**Skill 與 runbook 的分工**：OpenClaw skill 會進 system prompt，runbook 是用工具查的。3B active 的模型每多一個可見 skill 就多一分干擾，所以只留一個 `ops` skill（完整工具清單、診斷流程、停止與升級規則），其餘知識一律寫成 runbook。加 runbook 平時零成本。
 要動 Spark 宿主機的 systemd/docker，把 `run_tool` 的容器白名單換成 host 執行器即可，迴圈與驗證不用改。
 
 ## 8. 踩過的坑（一定要知道）

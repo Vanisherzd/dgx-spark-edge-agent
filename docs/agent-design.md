@@ -134,6 +134,56 @@ It has a four-case self-check in the commit. **It did not fire in the three pass
 `logs/oai-shim.log`), so the failure is intermittent, not systematic: treat the shim recovery as insurance, not as the
 reason the drills now pass.
 
+## Stability and the written material (2026-09-22 23:33)
+
+Three drills, run twice, plus one fault the agent had never seen. **7/7 PASS**, no `tool_search`, no `self_heal`
+fallback, no invented tool id.
+
+| Case | Run 1 | Run 2 | Tool calls |
+| --- | --- | --- | --- |
+| bad-config | PASS 75 s | PASS 55 s | 8 |
+| nginx-stopped | PASS 38 s | PASS 50 s | 6, 7 |
+| upstream-down | PASS 47 s | PASS 62 s | 5, 7 |
+| bad-upstream-name (new) | PASS 70 s | – | 9 |
+
+In all six runs of the drilled cases the agent never opened a runbook: `check_health` -> `docker_ps` -> `docker_logs`
+is enough to solve them from the evidence. That is the useful measurement about written material — it earns its place
+only on a fault the model cannot reason out. So we injected one it had never seen (`bad-upstream-name`: the
+`proxy_pass` target renamed to a host that does not exist). The agent read the logs, read the config, and then called
+`search_runbooks {"query": "host not found in upstream"}`, which returned `upstream-name-resolution.md`, and applied
+it. The retrieval path is load-bearing exactly where it was designed to be.
+
+### Skills architecture: one visible skill, many retrieved runbooks
+
+OpenClaw skills are injected into the system prompt; runbooks are fetched by a tool. For a 30B model with 3B active
+parameters that difference decides the design:
+
+- **One visible skill** (`ops`). Sixteen visible skills is what broke tool calling in the first place. Every extra
+  skill costs prompt tokens and offers the model another wrong thing to do.
+- **Everything else is a runbook**, retrieved on the symptom. Adding one costs nothing at rest.
+
+`skills/ops/SKILL.md` was stale (10 tools, and it taught the shell fallback as the primary path). Rewritten: all 16
+tools under the names the model sees, diagnosis separated from action, and an explicit stop rule — if the same action
+fails twice, look for another cause; if 200/200 is unreachable, escalate with the exit code and the log lines rather
+than looping. An honest escalation is a valid outcome for an unattended agent; a silent loop is not.
+
+`search_runbooks` scored plain body-word overlap, which hands the longest document the win as the set grows. Titles
+now count triple, a shorter body breaks ties, and a query that matches nothing returns the catalogue so the agent
+learns what exists. Checked against eight symptom phrasings, each retrieving its own runbook.
+
+Runbooks now cover: service down, nginx config error, upstream 502 (refused), upstream 504 (timeout), upstream name
+resolution, container crash loop, OOM kill (exit 137), disk full.
+
+### What is still missing for unattended offline operation
+
+1. **Host-level actions.** The agent gained six read-only host diagnostics, but it can only act inside the two
+   containers. A stopped docker daemon, a full disk, or a runaway process can be diagnosed and reported, not fixed.
+   A host executor needs an explicit unit and path whitelist, and that is a blast-radius decision to take deliberately.
+2. **No memory across incidents.** Every run starts blank; a fault seen yesterday teaches it nothing today.
+3. **Keyword retrieval.** Fine for eight runbooks. Around fifty it needs embeddings (the Phase 2 RAG item).
+4. **Fault coverage.** Four injectable cases against eight runbooks; the untested ones are written from the tool
+   surface, not from an observed failure.
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.
