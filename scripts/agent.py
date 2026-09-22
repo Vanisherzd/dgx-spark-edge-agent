@@ -38,8 +38,9 @@ UNIT_RE = re.compile(r"^[A-Za-z0-9@._:-]{1,64}$")          # systemd unit / jour
 #                                  construction; report it and escalate.
 #   any system unit              - sudo on this host needs a password, and no password belongs in this repo.
 #   images and volumes           - shared with the rest of the lab; the agent reports pressure, a human decides.
-CLEANUP_GLOBS = (str(ROOT / "logs" / "*.log"), str(ROOT / "logs" / "*.jsonl"), str(ROOT / "logs" / "*.out"),
-                 str(ROOT / "logs" / "agent" / "*.jsonl"), "/tmp/edge-agent-*")
+# logs/agent/*.jsonl is the incident audit trail and is deliberately not cleanable: an ops agent does not delete
+# the record of what it did.
+CLEANUP_GLOBS = (str(ROOT / "logs" / "*.log"), str(ROOT / "logs" / "*.out"), "/tmp/edge-agent-*")
 CLEANUP_MIN_AGE_S = 600        # never delete a file something is probably still writing
 PROTECTED_CMD = re.compile(r"sshd?\b|systemd|dockerd|containerd|trtllm|tensorrt|openclaw|openshell|nemoclaw|"
                            r"ops_api|oai_shim|uv run|/init\b", re.I)

@@ -4,6 +4,9 @@
   uv run --no-sync scripts/rag.py query "502 on api" show what each scorer retrieves
   uv run --no-sync scripts/rag.py eval               recall@1 for keyword / dense / hybrid over the query set
 
+Measured on the 20-query set at the bottom of this file: dense 20/20, hybrid 18-20 depending on weight, keyword
+15/20. Dense is the default; RAG_MODE=keyword|dense|hybrid overrides it.
+
 Design notes. Chunks are scored, whole runbooks are returned: an agent that gets half a procedure will act on half a
 procedure. The embedding model (BAAI/bge-small-en-v1.5, 33M params, 384 dims) runs on CPU in milliseconds and stays
 off the GPU, which belongs to the inference server. Without the index, or without torch, everything falls back to the
@@ -11,6 +14,9 @@ keyword scorer, so a fresh clone still answers.
 """
 import json
 import os
+
+os.environ.setdefault("HF_HUB_OFFLINE", "1")     # the box may have no route out; never let retrieval wait on the hub
+
 import pathlib
 import re
 import sys
@@ -112,8 +118,13 @@ def _normalize(scores):
     return {k: (v - lo) / (hi - lo) for k, v in scores.items()} if hi > lo else {k: 0.0 for k in scores}
 
 
-def rank(query, mode="hybrid"):
-    """Ranked [(name, score)]. Hybrid leans on keywords (exact error text) and lets dense break near-ties."""
+def rank(query, mode="dense"):
+    """Ranked [(name, score)].
+
+    Measured over the 20-query set below on 8 runbooks: dense 20/20, hybrid at every weight 18-20, keyword 15/20.
+    The expectation that exact error strings would favour lexical matching did not survive the measurement, so dense
+    is the default and hybrid stays available for a larger corpus. Keyword is the fallback with no index.
+    """
     kw = keyword_scores(query)
     if mode == "keyword":
         combined = dict(kw)
@@ -131,7 +142,7 @@ def rank(query, mode="hybrid"):
 
 def search(query, k=2, mode=None):
     """Formatted result for the agent: the full text of the best runbooks, or the catalogue when nothing matches."""
-    mode = mode or os.environ.get("RAG_MODE", "hybrid")
+    mode = mode or os.environ.get("RAG_MODE", "dense")
     docs = {name: text for name, _, text in documents()}
     ranked = rank(query, mode)
     hits = [(n, s) for n, s in ranked if s > 0]

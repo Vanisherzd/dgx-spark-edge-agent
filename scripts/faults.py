@@ -1,7 +1,7 @@
 """Fault-injection harness on two sandbox containers (never touches the Spark host services).
 
   uv run --no-sync scripts/faults.py setup            create edge-victim (nginx front, 127.0.0.1:8880) + edge-victim-app (upstream)
-  uv run --no-sync scripts/faults.py inject <case>    cases: nginx-stopped | bad-config | upstream-down | bad-upstream-name
+  uv run --no-sync scripts/faults.py inject <case>    cases: nginx-stopped | bad-config | upstream-down | bad-upstream-name | container-removed
   uv run --no-sync scripts/faults.py verify           exit 0 when / and /api/ both return 200
   uv run --no-sync scripts/faults.py reset            restore config, start both containers
   uv run --no-sync scripts/faults.py run <case>       inject -> agent.py -> verify   (the end-to-end test)
@@ -102,6 +102,8 @@ def inject(case):
         sh(f"docker restart -t 1 {FRONT}")  # nginx refuses the config and the container exits
     elif case == "upstream-down":
         sh(f"docker stop -t 1 {APP}", check=True)
+    elif case == "container-removed":
+        sh(f"docker rm -f {FRONT}", check=True)     # start/restart cannot fix this; the container has to be recreated
     elif case == "bad-upstream-name":
         (CONF_DIR / "default.conf").write_text(BAD_NAME_CONF)
         sh(f"docker restart -t 1 {FRONT}")  # nginx cannot resolve the name and exits
