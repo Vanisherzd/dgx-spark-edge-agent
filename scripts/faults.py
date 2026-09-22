@@ -58,6 +58,7 @@ def setup():
 
 
 def reset():
+    CONF_DIR.mkdir(parents=True, exist_ok=True)
     (CONF_DIR / "default.conf").write_text(GOOD_CONF)
     sh(f"docker start {APP} {FRONT} >/dev/null 2>&1")
     sh(f"docker restart {FRONT} >/dev/null 2>&1")
