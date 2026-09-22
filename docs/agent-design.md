@@ -184,6 +184,74 @@ resolution, container crash loop, OOM kill (exit 137), disk full.
 4. **Fault coverage.** Four injectable cases against eight runbooks; the untested ones are written from the tool
    surface, not from an observed failure.
 
+## Host layer (2026-09-23)
+
+Four actions that reach past the two containers but stay inside what this project created:
+
+| Tool | What it fixes |
+| --- | --- |
+| `recreate_stack` | a container that was removed, not stopped — `docker_start` returns `No such container` and no amount of restarting helps |
+| `network_repair` | the stack network missing, or a container detached from it |
+| `cleanup_disk` | this project's own old logs, by glob, skipping any file a running process still holds open |
+| `kill_process` | a runaway process owned by this user that is not part of the platform |
+
+The whitelist is defined by what is absent as much as by what is present:
+
+- **The docker daemon is not in it.** The inference server runs as `docker run --rm`, so bouncing dockerd deletes the
+  model the agent thinks with. A dead daemon is unrecoverable from inside this agent by construction; it reports and
+  escalates. (`docker inspect trtllm-edge --format '{{.HostConfig.AutoRemove}}'` -> `true`.)
+- **No system unit.** `sudo` on this host needs a password, and no password belongs in a repo. `systemctl --user` has
+  nothing of ours loaded.
+- **No images or volumes.** They are shared with the rest of the lab. The agent reports disk pressure and a human
+  decides what goes.
+
+`cleanup_disk` learned two rules the hard way. It must not delete `logs/agent/*.jsonl`, which is the incident audit
+trail — an ops agent does not delete the record of what it did. And it must skip files a live process holds open: the
+first version unlinked `logs/trt-serve.log` while the inference server had it open, which frees nothing and sends
+every later line to an inode nobody can read. (Nothing was lost: `docker logs trtllm-edge` carries the same output.)
+
+### An absent container was invisible
+
+The first `container-removed` drill passed in 190 s and 15 tool calls, six of them re-reading the same `docker_ps`
+output. `docker ps -a` simply omits a container that no longer exists, so its absence looked the same as not having
+spotted it, next to a sibling that was healthy. `docker_ps` now lists every container the stack expects and marks the
+missing ones, and `container-missing.md` states that start and restart cannot help here. The same drill then took
+**39 s and 4 calls**: `check_health`, `docker_ps`, `recreate_stack`, `check_health`.
+
+## Retrieval: measured, not assumed (2026-09-23)
+
+`scripts/rag.py` replaces the inline keyword scorer. Chunks are scored, whole runbooks are returned — an agent handed
+half a procedure will act on half a procedure. Embeddings come from `BAAI/bge-small-en-v1.5` (33M params, 384 dims)
+running on CPU through `transformers`, deliberately off the GPU the inference server owns, with `HF_HUB_OFFLINE=1`
+forced so retrieval never waits on a network this box may not have. Build: 19 chunks from 9 runbooks in 12 s. First
+query in a process pays ~2.5 s to load the model, then milliseconds.
+
+Recall@1 over 23 symptom queries, five of which deliberately share no vocabulary with their runbook:
+
+| Scorer | 8 runbooks / 20 queries | 9 runbooks / 23 queries |
+| --- | --- | --- |
+| keyword (title-weighted overlap) | 15/20 | 16/23 |
+| **dense (bge-small, cosine)** | **20/20** | **23/23** |
+| hybrid 0.6 keyword + 0.4 dense | 18/20 | 20/23 |
+
+The premise going in was that pasted error strings would favour lexical matching and that a hybrid would win. It did
+not survive the measurement: dense took every query including the literal ones (`no space left on device`,
+`exited 137 killed`, `host not found in upstream`). A weight sweep confirmed there was nothing to tune — keyword 0.1
+ties at 20/20, every other weight and both rank fusions score lower:
+
+| fusion | recall@1 /20 |
+| --- | --- |
+| dense only | 20 |
+| weighted, keyword 0.1 | 20 |
+| weighted, keyword 0.2 – 0.5 | 19 |
+| weighted, keyword 0.6 | 18 |
+| reciprocal rank fusion (k=10, k=60) | 18 |
+| max fusion | 17 |
+
+So dense is the default, keyword stays as the no-index fallback and as the baseline, and `RAG_MODE` switches modes.
+Caveat worth keeping in view: 23 queries written by the same person who wrote the runbooks is a strong signal, not a
+benchmark. The eval set lives in `scripts/rag.py` and should grow with every fault case.
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.

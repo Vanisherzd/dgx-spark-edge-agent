@@ -60,6 +60,7 @@ scripts/
   nemoclaw-drill.sh             注入錯誤 → 叫 NemoClaw sandbox agent 修 → 驗證 → 印出它呼叫過的工具
   ops-sandbox-helper.sh         上傳到 sandbox 的 /sandbox/bin/ops（`ops tools` / `ops call <tool> '<json>'`，MCP 之外的後備路徑）
   smoke.py / probe.py           健康+tool call 煙霧測試；8 題 needle 精準度探針
+  rag.py                        runbook 檢索：dense（bge-small，預設）/ keyword / hybrid，附 23 題評測集
   bench.py / serve-summary.py / bench-summary.py   吞吐測試與結果表
   try.sh                        對任一模型/參數組合：起臨時 server(:8101) → bench → smoke → 關掉
   download.sh                   一次性下載模型到 ~/.cache/huggingface（之後全離線）
@@ -67,7 +68,7 @@ scripts/
 skills/ops/SKILL.md             OpenClaw skill，教 sandbox agent 用 ops 指令
 nemoclaw/openclaw-patch.json5   小模型的工具介面設定（關掉 tool search、只留 ops skill、關 heartbeat）
 nemoclaw/workspace/*.md         取代 OpenClaw 預設 bootstrap 的精簡 AGENTS.md / TOOLS.md / HEARTBEAT.md
-runbooks/*.md                   小型 RAG 語料（IT runbook，8 篇：服務掛掉、設定錯、502、504、上游名稱解析、crash loop、OOM、磁碟滿）
+runbooks/*.md                   小型 RAG 語料（IT runbook，9 篇：服務掛掉、容器被刪、設定錯、502、504、上游名稱解析、crash loop、OOM、磁碟滿）
 victim/conf.d/                  victim nginx 設定（由 faults.py 產生，不入版控）
 trt/*.yaml                      trtllm-serve 的 extra_llm_api_options（nano.yaml 為正式）
 systemd/*.service               user unit（目前刻意不啟用開機自啟）
@@ -156,6 +157,9 @@ nemoclaw edge-agent agent --agent main --session-id t1 -m "Reply with one word: 
 ```bash
 uv run --no-sync scripts/faults.py setup      # edge-victim (nginx, 127.0.0.1:8880) + edge-victim-app（上游）
 uv run --no-sync scripts/faults.py verify     # / 200 /api/ 200 -> PASS
+uv run hf download BAAI/bge-small-en-v1.5     # 檢索用的 embedding 模型，33M，跑 CPU 不佔 GPU
+uv run --no-sync scripts/rag.py build         # 建索引到 logs/rag-index.npz（約 12 秒）
+uv run --no-sync scripts/rag.py eval          # 檢索品質：dense 23/23、hybrid 20/23、keyword 16/23
 ```
 
 ### 3.6（備援）vLLM 路線
@@ -263,7 +267,9 @@ prompt 就是值班人員會收到的一句警報，沒有指定任何指令。�
 2. `runbooks/` 加一篇對應的 runbook（RAG 語料）。
 3. 若需要新動作，在 `scripts/agent.py` 的 `TOOLS` + `run_tool()` 加白名單工具（ops API 與 MCP 會自動曝露）。現成的主機層唯讀工具：`disk_usage`、`service_status`、`journal_tail`、`port_check`、`http_check`、`top_processes`。
 4. `uv run --no-sync scripts/faults.py run <case>` 與 `scripts/nemoclaw-drill.sh <case>` 各跑一次。
-現成案例：`nginx-stopped`、`bad-config`、`upstream-down`、`bad-upstream-name`。
+現成案例：`nginx-stopped`、`bad-config`、`upstream-down`、`bad-upstream-name`、`container-removed`。加 runbook 後要 `scripts/rag.py build` 重建索引，並把新症狀加進 `rag.py` 的 `EVAL`。
+
+**主機層動作**：`recreate_stack`（容器被整個刪掉，start/restart 救不回來）、`network_repair`、`cleanup_disk`（只刪本專案的舊 log，跳過行程正開著的檔案，不碰 image 與 volume，也不刪 `logs/agent/` 的事故軌跡）、`kill_process`（同一使用者、非平台行程）。刻意不放進白名單的是 docker daemon（推論容器是 `--rm`，重啟 daemon 會刪掉 agent 賴以思考的模型）、任何系統 unit（sudo 要密碼）、image 與 volume（全實驗室共用）。
 
 **Skill 與 runbook 的分工**：OpenClaw skill 會進 system prompt，runbook 是用工具查的。3B active 的模型每多一個可見 skill 就多一分干擾，所以只留一個 `ops` skill（完整工具清單、診斷流程、停止與升級規則），其餘知識一律寫成 runbook。加 runbook 平時零成本。
 要動 Spark 宿主機的 systemd/docker，把 `run_tool` 的容器白名單換成 host 執行器即可，迴圈與驗證不用改。
@@ -288,6 +294,9 @@ prompt 就是值班人員會收到的一句警報，沒有指定任何指令。�
 | Heartbeat 每 30 分打一次模型 | 空轉、每次重抓 MCP catalog、製造錯誤紀錄 | `agents.defaults.heartbeat.every: "0m"` + 註解-only 的 `HEARTBEAT.md` |
 | 模型把 tool call 寫在 `<think>` 裡且沒關 tag | `Agent couldn't generate a response`，故障沒修 | shim 緩衝串流，空回合才從 reasoning 救回 tool call |
 | 小模型走 OpenClaw meta 工具層 | id 打錯、arguments 空、字串 `\n` 雙重轉義 | 伺服端容錯；MCP 不過濾工具 |
+| 用 ssh 一行指令背景啟動服務 | 登入 shell 一結束就被殺，drill 中途收到 502 | `setsid nohup ... < /dev/null &` |
+| `docker ps -a` 不會列出被刪掉的容器 | agent 看不出差別，重複查六次 | `docker_ps` 改成列出預期容器並標 MISSING |
+| 清理 log 時刪到服務開著的檔案 | 空間沒釋放，之後的 log 寫進沒人讀得到的 inode | 跳過 `/proc/*/fd` 指到的檔案 |
 | `nemoclaw upload` 目的地 | 把檔名路徑當目錄 | 目的地給目錄 |
 | `openshell sandbox exec` / `nemoclaw exec` 吃 stdin | heredoc 腳本後半段被吞 | 一律 `</dev/null` |
 
