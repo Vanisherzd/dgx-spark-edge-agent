@@ -1,7 +1,7 @@
 """Self-healing decision loop: observe -> retrieve runbooks -> decide (tool calls) -> act -> verify.
 
   uv run --no-sync scripts/agent.py [--case NAME] [--dry-run] [--max-steps 8]
-  env: VLLM_URL (default http://127.0.0.1:8355), SERVED_NAME (edge-agent), AGENT_THINK=0 to disable thinking
+  env: VLLM_URL (default http://127.0.0.1:8000), SERVED_NAME (edge-agent), AGENT_THINK=0 to disable thinking
 
 Scope is deliberately small: two sandbox containers (see scripts/faults.py). Every action goes through a whitelist;
 remediation tools become no-ops with --dry-run. Each step is appended to logs/agent/<timestamp>.jsonl.
@@ -23,7 +23,7 @@ RUNBOOKS = ROOT / "runbooks"
 NAMES = {"edge-victim", "edge-victim-app"}
 HEALTH = {"front": "http://127.0.0.1:8880/", "api": "http://127.0.0.1:8880/api/"}
 EXEC_ALLOW = ("nginx -t", "nginx -T", "cat ", "ls", "ps", "curl", "df", "du", "tail", "head", "grep", "id", "env")
-BASE = os.environ.get("VLLM_URL", "http://127.0.0.1:8355")
+BASE = os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
 MODEL = os.environ.get("SERVED_NAME", "edge-agent")
 THINK = os.environ.get("AGENT_THINK", "1") == "1"
 

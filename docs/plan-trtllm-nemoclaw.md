@@ -97,7 +97,7 @@ Expected: single-stream decode around the model's base speed (no MTP on TRT-LLM/
 Also: the needle probe moved between 5/8 and 7/8 across identical configs at temperature 0, so treat single-run probe
 scores as ±1–2.
 
-Final production config: `trt/nano.yaml` (baseline), started manually with `scripts/serve-trt.sh` (no autostart by request).
+Final production config: `trt/nano.yaml` (baseline), started manually with `scripts/serve-trt.sh` (no autostart by request). Port moved from 8355 to **8000**: NemoClaw only auto-rewrites loopback endpoints on its bundled host-gateway ports (8000, 11434, 11435); on 8355 the sandbox got 503/403.
 
 ## Host changes on 2026-09-22 (user-approved)
 Left the lab Kubernetes cluster: `kubectl drain dgx-spark`, `systemctl disable --now kubelet cri-docker`, removed the

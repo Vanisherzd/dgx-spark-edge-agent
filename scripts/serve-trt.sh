@@ -17,7 +17,7 @@ exec docker run --rm --name "$NAME" --gpus all --ipc host --network host \
   -e HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" -e PYTORCH_ALLOC_CONF=expandable_segments:True -e TRTLLM_ENABLE_PDL="${TRTLLM_ENABLE_PDL:-1}" \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface" -v "$YAML:/config.yaml:ro" \
   "$IMAGE" trtllm-serve serve "$MODEL" \
-    --host "${HOST:-127.0.0.1}" --port "${PORT:-8355}" --served_model_name "${SERVED_NAME:-edge-agent}" \
+    --host "${HOST:-127.0.0.1}" --port "${PORT:-8000}" --served_model_name "${SERVED_NAME:-edge-agent}" \
     --trust_remote_code --tokenizer "$TOK_IN_CONTAINER" \
     --reasoning_parser "${REASONING_PARSER:-nano-v3}" --tool_parser "${TOOL_PARSER:-qwen3_coder}" \
     --extra_llm_api_options /config.yaml "$@"
