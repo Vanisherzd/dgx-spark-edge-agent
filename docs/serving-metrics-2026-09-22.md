@@ -59,5 +59,23 @@ IFEval 24 min at 8 concurrent requests. Results JSON: `logs/lm-eval/edge-agent/`
 | long-context decode | 41.7 tok/s |
 | thinking on | 58.4 tok/s |
 | needle probe | 5/8 (thinking off) / 5/8 (thinking on) |
+| GSM8K (`gsm8k_cot_llama`), 150, thinking on | **96.7 % ± 1.5** (strict = flexible), 5 min at 8 concurrent |
+| IFEval, 100, thinking on | prompt-level strict **80.0 % ± 4.0** (loose 80.0 %), instruction-level 79.1 %; 13 min at 8 concurrent |
 | GPU memory | 34 GiB (`free_gpu_memory_fraction: 0.5`) |
 No speculative decoding on this path yet. See `docs/plan-trtllm-nemoclaw.md` for the setup and the issues fixed.
+
+## Engine comparison (same box, same scripts, 2026-09-22)
+| | vLLM 0.29 + Qwen3.6-35B-A3B-FP8 + MTP3 | TensorRT-LLM 1.3.0rc13 + Nemotron-3-Nano-30B-A3B-NVFP4 |
+|---|---|---|
+| startup to healthy | 275 s | 106 s |
+| single stream | 60.7 tok/s | 57.9 tok/s (no speculative decoding) |
+| 8 concurrent aggregate | 343 tok/s | 237 tok/s |
+| prefill 12.9k tokens | 3.5 s cold, 0.3 s prefix hit | 1.17 s, no prefix cache |
+| long-context decode | 56.6 tok/s | 41.7 tok/s |
+| GSM8K-CoT (150) | 92.7 % | 96.7 % |
+| IFEval prompt-strict (100) | 78.0 % | 80.0 % |
+| needle probe | 8/8 | 5/8 |
+| GPU memory | 52 GiB | 34 GiB |
+Reading: Nemotron-3-Nano is the stronger reasoner and instruction follower and starts faster; Qwen3.6-35B-A3B is far
+better at pulling exact details out of a long, repetitive context. With a real retriever (few candidate chunks in the
+prompt) the needle gap matters less; with corpus-in-prompt RAG it matters a lot.
