@@ -34,7 +34,7 @@
 
 ---
 
-## 1. 硬體與已驑證版本
+## 1. 硬體與已驗證版本
 
 | 項目 | 值 |
 |---|---|
@@ -42,7 +42,7 @@
 | OS / 驅動 | Ubuntu 24.04.4（DGX OS）, kernel 6.17 nvidia, driver 580.126.09, **CUDA 13.0**（`/usr/local/cuda`，nvcc 不在 PATH） |
 | 推論（正式） | TensorRT-LLM 容器 `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc13`（arm64），模型 `nvidia/NVIDIA-Nemotron-3-Nano-30B-A3B-NVFP4`（19.3 GB） |
 | 推論（備援） | vLLM 0.29.0 + torch 2.13.0+cu130（純 PyPI aarch64 wheel），FlashInfer 0.6.18，模型 `Qwen/Qwen3.6-35B-A3B-FP8` + MTP |
-| Python / 套件 | uv 0.12.17，uv 管理的 CPython 3.12.14（系統 python3.12 沒 headers），`uv.lock` 全部 252 套件鎖版 |
+| Python / 套件 | uv 0.12.17，uv 管理的 CPython 3.12.14（系統 python3.12 沒 headers），`uv.lock` 全部 242 套件鎖版 |
 | Agent 執行環境 | NemoClaw v0.0.124，OpenShell 0.0.116（docker sandbox），OpenClaw 2026.7.1 |
 | 帶寬上限 | LPDDR5X ≈ 273 GB/s → 單流 decode ≈ 273 ÷（每 token 讀的權重 GB）tok/s；這是模型選擇的核心限制 |
 
@@ -179,7 +179,7 @@ Log 位置：`logs/trt-serve.log`（引擎）、`logs/oai-shim.log`（`SHIM_DEBU
 
 ## 5. 我們做過的測試與數據
 
-### 5.1 引擎 / 模型選型矯陣（`docs/bench-2026-09-22.md`）
+### 5.1 引擎 / 模型選型矩陣（`docs/bench-2026-09-22.md`）
 
 用 `scripts/try.sh` 對每個組合起臨時 server 跑 `bench.py`、`probe.py`、`smoke.py`：
 
@@ -220,7 +220,7 @@ uv run lm_eval --model local-chat-completions --model_args "…同上…" --task
 
 ### 5.4 TensorRT-LLM 調參
 
-PDL 無感；NGram 投機解碎觸發 `CUDA error: device-side assert`；`enable_block_reuse` 讓首個長 prompt 從 1.2 s 變 18.7 s → 全部不採用，正式用 `trt/nano.yaml`（`free_gpu_memory_fraction 0.5`、chunked prefill、`max_seq_len 32768`）。
+PDL 無感；NGram 投機解碼觸發 `CUDA error: device-side assert`；`enable_block_reuse` 讓首個長 prompt 從 1.2 s 變 18.7 s → 全部不採用，正式用 `trt/nano.yaml`（`free_gpu_memory_fraction 0.5`、chunked prefill、`max_seq_len 32768`）。
 
 ## 6. 錯誤注入與自我修復 drill
 
@@ -272,7 +272,7 @@ scripts/nemoclaw-drill.sh bad-config        # 注入 → nemoclaw edge-agent age
 ## 10. 安全與待辦
 
 - TRT-LLM API 綁 0.0.0.0 無認證（NemoClaw 直連需要）：lab LAN 可達，要收就用 iptables 只放 172.24.0.0/16。
-- `~/.nemoclaw.bak-2026-09-22/credentials.json` 內有舊的 NVIDIA API key；`hsnl` 密碩曾出現在對話中 → 都建議更換。
+- `~/.nemoclaw.bak-2026-09-22/credentials.json` 內有舊的 NVIDIA API key；`hsnl` 密碼曾出現在對話中 → 都建議更換。
 - HF cache 還留著 ~35 GB 未完成的 `nvidia/Qwen3.6-35B-A3B-NVFP4`（NemoClaw express 誤下載），`hf cache rm model/nvidia/Qwen3.6-35B-A3B-NVFP4` 可清。
 - 待做：RAG 真正的檢索器（Nemotron 在整包語料塞 prompt 時抓細節較弱）、host 級別動作的執行器、更多錯誤注入案例。
 
@@ -282,7 +282,7 @@ scripts/nemoclaw-drill.sh bad-config        # 注入 → nemoclaw edge-agent age
 |---|---|
 | `docs/superpowers/specs/2026-09-21-edge-agent-infra-design.md` | Phase 1 設計與地雷清單 |
 | `docs/spark-hw.md` | 主機事實、port、停掉/移除了什麼、安全備註 |
-| `docs/bench-2026-09-22.md` | 模型/加速矯陣、needle 探針、事故紀錄 |
+| `docs/bench-2026-09-22.md` | 模型/加速矩陣、needle 探針、事故紀錄 |
 | `docs/serving-metrics-2026-09-22.md` | TTFT/TPOT/ITL/E2E、GSM8K/IFEval、兩引擎對照 |
 | `docs/plan-trtllm-nemoclaw.md` | TRT-LLM 與 NemoClaw 遷移：事實查核、執行日誌、每個坑的修法 |
 | `docs/agent-design.md` | Agent 迴圈設計、工具白名單、兩條 drill 路徑與結果 |
