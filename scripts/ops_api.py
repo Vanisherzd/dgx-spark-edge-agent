@@ -53,11 +53,17 @@ class H(BaseHTTPRequestHandler):
             if name not in {t["name"] for t in TOOLS}:
                 return {"jsonrpc": "2.0", "id": rid, "error": {"code": -32602, "message": f"unknown tool {name}"}}
             t0 = time.time()
-            result = agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1")
+            try:
+                result, is_err = agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1"), False
+            except Exception as e:  # a tool bug must come back as a tool error, never as a dropped connection
+                result, is_err = f"tool {name} raised {type(e).__name__}: {e}", True
+            if not is_err and isinstance(result, str) and result.startswith(("error:", "denied:", "bad arguments")):
+                is_err = True
             with LOG.open("a") as f:
                 f.write(json.dumps({"ts": time.strftime("%H:%M:%S"), "from": self.client_address[0], "via": "mcp", "tool": name,
-                                    "args": args, "ms": int((time.time() - t0) * 1000), "result": result[:300]}, ensure_ascii=False) + "\n")
-            return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": result}], "isError": False}}
+                                    "args": args, "raw_params_keys": sorted(params.keys()), "ms": int((time.time() - t0) * 1000),
+                                    "is_error": is_err, "result": str(result)[:300]}, ensure_ascii=False) + "\n")
+            return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": str(result)}], "isError": is_err}}
         if method == "ping":
             return {"jsonrpc": "2.0", "id": rid, "result": {}}
         if method.startswith("notifications/"):
@@ -88,7 +94,10 @@ class H(BaseHTTPRequestHandler):
         if name not in {t["name"] for t in TOOLS}:
             return self._send(400, {"error": f"unknown tool {name}"})
         t0 = time.time()
-        result = agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1")
+        try:
+            result = agent.run_tool(name, args, dry_run=os.environ.get("OPS_DRY_RUN") == "1")
+        except Exception as e:
+            result = f"tool {name} raised {type(e).__name__}: {e}"
         with LOG.open("a") as f:
             f.write(json.dumps({"ts": time.strftime("%H:%M:%S"), "from": self.client_address[0], "tool": name,
                                 "args": args, "ms": int((time.time() - t0) * 1000), "result": result[:300]}, ensure_ascii=False) + "\n")

@@ -3,6 +3,11 @@
 Offline-capable IT self-healing agent on the lab DGX Spark (GB10, 119 GiB unified memory, aarch64).
 Phase 1 = inference infra: vLLM serving `Qwen/Qwen3.6-35B-A3B-FP8` (+ MTP speculative decoding, ~67 tok/s single stream) behind an OpenAI-compatible API. Model/acceleration choice: `docs/bench-2026-09-22.md`. Design: `docs/superpowers/specs/2026-09-21-edge-agent-infra-design.md`. Host facts: `docs/spark-hw.md`.
 
+## Repos
+GitHub (private): `github.com/Vanisherzd/dgx-spark-edge-agent`. Lab Spark: `hsnl@192.168.2.60:edge-agent` (accepts pushes). Laptop clone:
+`~/Desktop/HSNL/edge-agent` (remotes `spark`, `origin`). The lab VPN blackholes GitHub from the laptop, so push GitHub from the Spark:
+`ssh hsnl@192.168.2.60 'cd ~/edge-agent && git push origin main'` (token cached there? no: pass it via a credential helper, see docs/hackathon-runbook.md).
+
 ## Layout
 ```
 pyproject.toml / uv.lock      uv project, Python 3.12, vllm + openai pinned

@@ -76,6 +76,23 @@ def search_runbooks(query):
 
 
 def run_tool(name, args, dry_run):
+    if isinstance(args, str):            # some clients send arguments as a JSON string
+        try:
+            args = json.loads(args or "{}")
+        except json.JSONDecodeError:
+            return f"bad arguments (not JSON): {args[:200]}"
+    args = args or {}
+    if "name" in args and args["name"] is None:
+        args.pop("name")
+    if name in ("docker_logs", "docker_exec", "docker_start", "docker_restart") and "name" not in args:
+        return f"error: {name} needs args.name (one of {sorted(NAMES)})"
+    if name == "docker_exec" and "cmd" not in args:
+        return "error: docker_exec needs args.cmd"
+    if name == "write_config" and "content" not in args:
+        return "error: write_config needs args.content (the full file)"
+    if name == "search_runbooks" and "query" not in args:
+        return "error: search_runbooks needs args.query"
+
     def guard(n):
         if n not in NAMES:
             return f"denied: container {n!r} is outside the allowed set {sorted(NAMES)}"
