@@ -50,9 +50,11 @@ nemoclaw() { stage nemoclaw
     --add-allow host.openshell.internal:8790:GET:/tools --add-allow host.openshell.internal:8790:POST:/call \
     --add-allow host.openshell.internal:8790:POST:/mcp --add-allow host.openshell.internal:8790:GET:/mcp --add-allow host.openshell.internal:8790:DELETE:/mcp \
     --binary /usr/bin/curl --binary /usr/bin/python3 --binary /usr/local/bin/node --rule-name ops-api --wait || true
-  nemoclaw edge-agent exec -- mkdir -p /sandbox/bin >/dev/null 2>&1 || true
+  nemoclaw edge-agent exec -- mkdir -p /sandbox/bin /sandbox/.openclaw/skills/ops >/dev/null 2>&1 || true
   nemoclaw edge-agent upload scripts/ops-sandbox-helper.sh /sandbox/bin/ops >/dev/null 2>&1 && nemoclaw edge-agent exec -- chmod +x /sandbox/bin/ops >/dev/null 2>&1 || true
-  openshell sandbox exec -- openclaw mcp add ops --url http://host.openshell.internal:8790/mcp --transport streamable-http --no-probe >/dev/null 2>&1 || true
+  # upload treats the destination as a directory: give it the skill directory, not the file path
+  nemoclaw edge-agent upload skills/ops/SKILL.md /sandbox/.openclaw/skills/ops/ >/dev/null 2>&1 || true
+  openshell sandbox exec -- sh -c 'openclaw mcp add ops --url http://host.openshell.internal:8790/mcp --transport streamable-http --timeout 600 --connect-timeout 30 --no-probe; openclaw mcp tools ops --include self_heal; openclaw mcp reload' >/dev/null 2>&1 || true
   nemoclaw onboard --resume --non-interactive --yes-i-accept-third-party-software || true
   nemoclaw edge-agent status | grep -E "Inference|Policies"; }
 
