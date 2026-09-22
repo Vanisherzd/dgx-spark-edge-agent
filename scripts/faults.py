@@ -1,7 +1,7 @@
 """Fault-injection harness on two sandbox containers (never touches the Spark host services).
 
   uv run --no-sync scripts/faults.py setup            create edge-victim (nginx front, 127.0.0.1:8880) + edge-victim-app (upstream)
-  uv run --no-sync scripts/faults.py inject <case>    cases: nginx-stopped | bad-config | upstream-down
+  uv run --no-sync scripts/faults.py inject <case>    cases: nginx-stopped | bad-config | upstream-down | bad-upstream-name
   uv run --no-sync scripts/faults.py verify           exit 0 when / and /api/ both return 200
   uv run --no-sync scripts/faults.py reset            restore config, start both containers
   uv run --no-sync scripts/faults.py run <case>       inject -> agent.py -> verify   (the end-to-end test)
@@ -25,7 +25,10 @@ GOOD_CONF = """server {
 """
 FRONT, APP, NET = "edge-victim", "edge-victim-app", "edge-net"
 BAD_CONF = GOOD_CONF.replace('return 200 "ok\\n";', 'return 200 "ok\\n"')  # drop one semicolon -> [emerg]
-assert BAD_CONF != GOOD_CONF
+# A fault the agent has not been drilled on: the upstream name is wrong, so nginx exits with "host not found in
+# upstream". Fixing it needs the runbook (or real reasoning), not the docker_start reflex that solves the other cases.
+BAD_NAME_CONF = GOOD_CONF.replace("http://edge-victim-app:80/", "http://edge-victim-backend:80/")
+assert BAD_CONF != GOOD_CONF and BAD_NAME_CONF != GOOD_CONF
 
 
 def sh(cmd, check=False):
@@ -73,6 +76,9 @@ def inject(case):
         sh(f"docker restart -t 1 {FRONT}")  # nginx refuses the config and the container exits
     elif case == "upstream-down":
         sh(f"docker stop -t 1 {APP}", check=True)
+    elif case == "bad-upstream-name":
+        (CONF_DIR / "default.conf").write_text(BAD_NAME_CONF)
+        sh(f"docker restart -t 1 {FRONT}")  # nginx cannot resolve the name and exits
     else:
         sys.exit(f"unknown case {case}")
     time.sleep(2)

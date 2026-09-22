@@ -63,7 +63,7 @@ TOOLS = [
     {"name": "docker_restart", "description": "Restart a container (needed after a config change)", "parameters": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "read_config", "description": "Read victim/conf.d/default.conf", "parameters": {"type": "object", "properties": {}}},
     {"name": "write_config", "description": "Replace victim/conf.d/default.conf with the given full content, then restart edge-victim is still required", "parameters": {"type": "object", "properties": {"content": {"type": "string"}}, "required": ["content"]}},
-    {"name": "search_runbooks", "description": "Keyword search over the runbooks; returns the best matching ones", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "search_runbooks", "description": "Search the IT runbooks for a symptom (502 upstream, nginx emerg config, disk full, oom, crash loop); returns the best matches, or the catalogue if nothing matches", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
     {"name": "disk_usage", "description": "Host filesystem usage (df) and docker disk usage; use for disk-full symptoms", "parameters": {"type": "object", "properties": {}}},
     {"name": "service_status", "description": "Whether a host systemd unit is active, plus its last status line (read-only)", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}}, "required": ["unit"]}},
     {"name": "journal_tail", "description": "Last lines of a host systemd unit's journal", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}, "lines": {"type": "integer", "default": 30}}, "required": ["unit"]}},
@@ -91,14 +91,26 @@ def http_status(url):
 
 
 def search_runbooks(query):
+    """Title-weighted keyword retrieval over the runbooks.
+
+    Plain body overlap favours whichever runbook is longest, which is the wrong answer as the set grows; the title
+    says what a runbook is *for*, so it counts triple, and a shorter body breaks ties. A query that matches nothing
+    returns the catalogue rather than an empty string, so the agent always learns what exists.
+    """
     terms = set(re.findall(r"[a-z0-9]+", query.lower()))
-    scored = []
-    for f in RUNBOOKS.glob("*.md"):
+    docs = []
+    for f in sorted(RUNBOOKS.glob("*.md")):
         text = f.read_text()
-        words = set(re.findall(r"[a-z0-9]+", text.lower()))
-        scored.append((len(terms & words), f.name, text))
-    scored.sort(reverse=True)
-    return "\n\n".join(f"## {n}\n{t.strip()[:1500]}" for s, n, t in scored[:2] if s)
+        title = text.splitlines()[0] if text else f.stem
+        title_words = set(re.findall(r"[a-z0-9]+", (f.stem + " " + title).lower()))
+        body_words = set(re.findall(r"[a-z0-9]+", text.lower()))
+        docs.append((3 * len(terms & title_words) + len(terms & body_words), -len(body_words), f.name, text))
+    docs.sort(reverse=True)
+    hits = [d for d in docs if d[0]]
+    if not hits:
+        return "no runbook matched. Available runbooks:\n" + "\n".join(
+            f"- {n}: {t.splitlines()[0].lstrip('# ')}" for *_, n, t in docs)
+    return "\n\n".join(f"## {n}\n{t.strip()[:1500]}" for *_, n, t in hits[:2])
 
 
 def run_tool(name, args, dry_run):
@@ -168,7 +180,7 @@ def run_tool(name, args, dry_run):
         (CONF_DIR / "default.conf").write_text(content)
         return "written; restart edge-victim to apply"
     if name == "search_runbooks":
-        return search_runbooks(args["query"]) or "no runbook matched"
+        return search_runbooks(args["query"])
     if name == "disk_usage":
         return sh("df -h -x tmpfs -x devtmpfs -x efivarfs | head -12") + "\n\n" + sh("docker system df")
     if name in ("service_status", "journal_tail"):
