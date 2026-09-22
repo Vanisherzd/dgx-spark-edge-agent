@@ -55,6 +55,15 @@ OpenClaw hides MCP tools behind `tool_search`/`tool_describe`/`tool_call` with l
 Nemotron-3-Nano occasionally typos them. `self_heal` (one MCP call that runs the host loop) is the fallback when the
 sandbox agent stalls. Run: `logs/nemoclaw-drill-mcp.sh bad-config` (drill script kept in `scripts/nemoclaw-drill.sh`).
 
+## NemoClaw drill result (2026-09-22 15:41)
+`logs/nemoclaw-drill-mcp.sh bad-config` -> PASS in 2.5 min. The sandbox agent (NemoClaw, OpenClaw runtime, Nemotron via
+TensorRT-LLM) called `ops__self_heal` over MCP; the host loop diagnosed the missing semicolon, rewrote the config,
+restarted the container, verified 200/200; the agent reported root cause / actions / final health. Two routes exist:
+- **self_heal** (one MCP call, reliable): NemoClaw is the interface and orchestrator, the same local model runs the
+  step-by-step decision loop on the host. Use this for demos and for the hackathon judges' fault cases.
+- **step-by-step in the sandbox** (skill `ops` + `/sandbox/bin/ops`, or the individual MCP tools): works when the model
+  drives the tools correctly; Nemotron-3-Nano-30B often mangles OpenClaw's meta-tool protocol, so it is best-effort.
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.

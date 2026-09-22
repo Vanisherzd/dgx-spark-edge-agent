@@ -36,6 +36,12 @@ Timing on the lab Spark: image pull 5 min, model 3 min, server to healthy 2 min,
   provider env so it uses ours; if it still does, `pkill -f "nemoclaw onboard"` and stop the `nemoclaw-hf-download-*` container.
 
 ## What to demo
+`logs/nemoclaw-drill-mcp.sh <case>` (also `scripts/nemoclaw-drill.sh`): the NemoClaw sandbox agent fixes the fault,
+normally by calling the `ops__self_heal` MCP tool, and reports root cause / actions / final health; `logs/ops-api.log`
+shows every host action. For a step-by-step view of the model's decisions use `uv run --no-sync scripts/faults.py run <case>`
+and the JSONL trace in `logs/agent/`.
+
+### Legacy notes
 `scripts/nemoclaw-drill.sh <case>` prints the agent's report, the health verification and the ops-API call log
 (`logs/ops-api.log`: every tool the sandbox agent invoked, with args and results). Cases: nginx-stopped, bad-config,
 upstream-down. New cases: add an `inject` branch in `scripts/faults.py` and a runbook in `runbooks/`.
