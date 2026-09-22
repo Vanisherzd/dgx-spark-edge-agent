@@ -10,10 +10,12 @@ import argparse
 import json
 import os
 import pathlib
+import ipaddress
 import re
 import socket
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 
 from openai import OpenAI
@@ -25,6 +27,20 @@ NAMES = {"edge-victim", "edge-victim-app"}
 HEALTH = {"front": "http://127.0.0.1:8880/", "api": "http://127.0.0.1:8880/api/"}
 EXEC_ALLOW = ("nginx -t", "nginx -T", "cat ", "ls", "ps", "curl", "df", "du", "tail", "head", "grep", "id", "env")
 UNIT_RE = re.compile(r"^[A-Za-z0-9@._:-]{1,64}$")          # systemd unit / journal identifier
+
+
+def local_target(host):
+    """Loopback and RFC1918 only: these tools run on the host for anyone who can reach the ops API, so they must not
+    become a probe into the rest of the network (or a cloud metadata endpoint)."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return f"cannot resolve {host!r}"
+    for *_, addr in infos:
+        ip = ipaddress.ip_address(addr[0])
+        if not (ip.is_loopback or ip.is_private) or ip.is_link_local:
+            return f"denied: {host} resolves to {ip}, outside loopback and the private ranges"
+    return None
 BASE = os.environ.get("VLLM_URL", "http://127.0.0.1:8000")
 MODEL = os.environ.get("SERVED_NAME", "edge-agent")
 THINK = os.environ.get("AGENT_THINK", "1") == "1"
@@ -52,7 +68,7 @@ TOOLS = [
     {"name": "service_status", "description": "Whether a host systemd unit is active, plus its last status line (read-only)", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}}, "required": ["unit"]}},
     {"name": "journal_tail", "description": "Last lines of a host systemd unit's journal", "parameters": {"type": "object", "properties": {"unit": {"type": "string"}, "lines": {"type": "integer", "default": 30}}, "required": ["unit"]}},
     {"name": "port_check", "description": "Whether a TCP port accepts connections", "parameters": {"type": "object", "properties": {"host": {"type": "string", "default": "127.0.0.1"}, "port": {"type": "integer"}}, "required": ["port"]}},
-    {"name": "http_check", "description": "GET an http(s) URL and return the status code and the first bytes of the body", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
+    {"name": "http_check", "description": "GET an http(s) URL on this host or the private network and return the status code and the first bytes of the body", "parameters": {"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}},
     {"name": "top_processes", "description": "Top host processes by CPU with memory usage", "parameters": {"type": "object", "properties": {}}},
     {"name": "finish", "description": "End the run with a verdict", "parameters": {"type": "object", "properties": {"status": {"type": "string", "enum": ["resolved", "unresolved", "escalate"]}, "root_cause": {"type": "string"}, "actions": {"type": "string"}}, "required": ["status", "root_cause", "actions"]}},
 ]
@@ -164,6 +180,9 @@ def run_tool(name, args, dry_run):
         return sh(f"journalctl -u {unit} -n {max(1, min(int(args.get('lines', 30)), 200))} --no-pager")
     if name == "port_check":
         host, port = str(args.get("host") or "127.0.0.1"), int(args["port"])
+        denied = local_target(host)
+        if denied:
+            return denied
         try:
             with socket.create_connection((host, port), timeout=3):
                 return f"{host}:{port} open"
@@ -173,6 +192,9 @@ def run_tool(name, args, dry_run):
         url = str(args["url"])
         if not url.startswith(("http://", "https://")):
             return "denied: url must be http(s)"
+        denied = local_target(urllib.parse.urlsplit(url).hostname or "")
+        if denied:
+            return denied
         try:
             with urllib.request.urlopen(url, timeout=5) as r:
                 return f"{r.status}\n{r.read(600).decode(errors='replace')}"
