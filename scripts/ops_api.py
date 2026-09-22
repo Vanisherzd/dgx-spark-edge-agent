@@ -61,7 +61,7 @@ class H(BaseHTTPRequestHandler):
                 is_err = True
             with LOG.open("a") as f:
                 f.write(json.dumps({"ts": time.strftime("%H:%M:%S"), "from": self.client_address[0], "via": "mcp", "tool": name,
-                                    "args": args, "raw_params_keys": sorted(params.keys()), "ms": int((time.time() - t0) * 1000),
+                                    "args": args, "raw_params": json.dumps(params, ensure_ascii=False)[:300], "ms": int((time.time() - t0) * 1000),
                                     "is_error": is_err, "result": str(result)[:300]}, ensure_ascii=False) + "\n")
             return {"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": str(result)}], "isError": is_err}}
         if method == "ping":
