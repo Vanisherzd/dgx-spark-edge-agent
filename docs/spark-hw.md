@@ -43,3 +43,10 @@ Removed stopped throwaway containers `clever_jackson`, `serene_dijkstra`, `zen_g
 `competent_varahamihira`, `infallible_tharp`, `flamboyant_tharp`, `vllm-qwen36` and images `vllm/vllm-openai:gemma`,
 `vllm/vllm-openai:cu130-nightly` (re-pullable). Kept `ghcr.io/spark-arena/dgx-vllm-eugr-nightly` (used by the stopped
 `qwen3-server`). Added: `nvcr.io/nvidia/tensorrt-llm/release:1.3.0rc13`, model `nvidia/Nemotron-3-Nano-Omni-30B-A3B-Reasoning-NVFP4`.
+
+## Security notes (2026-09-22)
+- `~/.nemoclaw/credentials.json` (March 2026 install) holds an NVIDIA API key; the old `nemoclaw setup-spark` passes it
+  on a `sudo -E NVIDIA_API_KEY=...` command line, so it shows up in process listings and error output. Rotate it at
+  build.nvidia.com before sharing this box again.
+- The `hsnl` account password was typed into a chat session on 2026-09-21; SSH key auth is set up, so rotate the
+  password as well.

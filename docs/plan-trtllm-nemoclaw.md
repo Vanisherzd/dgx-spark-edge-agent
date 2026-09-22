@@ -86,3 +86,37 @@ Expected: single-stream decode around the model's base speed (no MTP on TRT-LLM/
    Nemotron-3-Nano confuses details across near-identical runbook lines. Mitigations: real retrieval (few candidates
    in context) instead of dumping the whole corpus, or a stronger TRT-LLM-validated model (Nemotron-3-Super-120B-A12B
    NVFP4, gpt-oss-120b MXFP4) at lower speed.
+
+## Tuning matrix (2026-09-22, text-only Nemotron NVFP4)
+| variant | result |
+|---|---|
+| baseline + `TRTLLM_ENABLE_PDL=1` | 57.8 tok/s single, 236 tok/s at 8, prefill 11.1k tok/s: no measurable change vs. PDL off |
+| `kv_cache_config.dtype: fp8` | not measured: the run hit a port race with the previous container (fixed with a wait-for-port loop) |
+| NGram speculative decoding | server healthy but every request failed with `CUDA error: device-side assert triggered` during CUDA graph capture; unusable on this model/version |
+| `enable_block_reuse: true` (prefix cache) | works but hurts: first 12.9k-token prompt took 18.65 s (vs 1.16 s), a repeated prefix was not faster (1.18 s). Kept off. |
+Also: the needle probe moved between 5/8 and 7/8 across identical configs at temperature 0, so treat single-run probe
+scores as ±1–2.
+
+Final production config: `trt/nano.yaml` (baseline), started manually with `scripts/serve-trt.sh` (no autostart by request).
+
+## Host changes on 2026-09-22 (user-approved)
+Left the lab Kubernetes cluster: `kubectl drain dgx-spark`, `systemctl disable --now kubelet cri-docker`, removed the
+19 `k8s_*` pod containers. The node object still exists in the cluster (`kubectl delete node dgx-spark` when the admin
+wants it gone). `vllm-edge` autostart removed; nothing starts at boot now (per user request). All lab containers
+(CVAT, ctai, open-webui, watchtower, autoresearch) are kept, stopped.
+
+## NemoClaw install log (2026-09-22)
+- The March checkout (`~/workspace/NemoClaw`, npm-linked as `/usr/bin/nemoclaw`, OpenShell 0.0.11) was 5,577 commits
+  behind. The official installer refused twice: first because it could not read the old CLI's version, then because
+  the old sandbox state needed the "experimental OpenShell upgrade". Fix: removed the two stale symlinks
+  (`/usr/bin/nemoclaw`, `/usr/lib/node_modules/nemoclaw`; the checkout itself is untouched) and moved `~/.nemoclaw` to
+  `~/.nemoclaw.bak-2026-09-22`. Third run installed NemoClaw v0.0.124 + OpenShell 0.0.116 into `~/.npm-global` and
+  `~/.local/bin`, and started the gateway `nemoclaw` at https://127.0.0.1:8080 (mTLS).
+- Pitfall: on a DGX Spark the installer runs `nemoclaw onboard --non-interactive` by itself (express path) and starts
+  downloading the default `nvidia/Qwen3.6-35B-A3B-NVFP4` for a managed vLLM on :8000, which would fight the
+  TensorRT-LLM server for memory. Killed it; the partial download is still in the HF cache (~35 GB) until someone
+  removes it (`hf cache rm model/nvidia/Qwen3.6-35B-A3B-NVFP4`).
+- Onboarding is redone with `NEMOCLAW_PROVIDER=custom NEMOCLAW_ENDPOINT_URL=http://127.0.0.1:8355/v1
+  NEMOCLAW_MODEL=edge-agent NEMOCLAW_COMPATIBLE_AUTH_MODE=none NEMOCLAW_REASONING=true nemoclaw onboard
+  --non-interactive --fresh`. The gateway is a host process, so a loopback endpoint is reachable from it.
+- Sudo for the installer was fed through a temporary `SUDO_ASKPASS` helper that was deleted afterwards.

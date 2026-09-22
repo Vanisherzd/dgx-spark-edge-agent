@@ -19,6 +19,15 @@ containers and one config directory; `--dry-run` turns remediation into no-ops.
 (upstream for `/api/`). Cases: `nginx-stopped` (container stopped), `bad-config` (missing semicolon, container exits on
 start), `upstream-down` (502 on /api/). `faults.py run <case>` = reset -> inject -> agent -> verify -> PASS/FAIL.
 
+## First results (2026-09-22, TensorRT-LLM + Nemotron-3-Nano NVFP4, thinking on)
+| case | steps | what the agent did | result |
+|---|---|---|---|
+| nginx-stopped | 6 | docker_ps -> read_config -> docker_logs -> docker_start -> check_health -> nginx -t | PASS, ~55 s |
+| bad-config | 7 | docker_ps -> read_config -> docker_start (fails) -> docker_logs (finds `[emerg]`) -> write_config (fixed semicolon) -> docker_restart -> check_health | PASS, ~70 s |
+| upstream-down | 5 | docker_logs(app) -> read_config -> docker_ps -> docker_start(app) -> check_health | PASS, ~60 s |
+All verdicts were `resolved` with a correct root cause; traces in `logs/agent/*.jsonl`. Run them again with
+`uv run --no-sync scripts/faults.py run <case>`.
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.
