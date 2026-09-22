@@ -89,6 +89,8 @@ def setup():
 def reset():
     CONF_DIR.mkdir(parents=True, exist_ok=True)
     (CONF_DIR / "default.conf").write_text(GOOD_CONF)
+    for name in (APP, FRONT):       # a previous drill may have removed one; start cannot bring back what is gone
+        ensure(name)
     sh(f"docker start {APP} {FRONT} >/dev/null 2>&1")
     sh(f"docker restart {FRONT} >/dev/null 2>&1")
     time.sleep(2)
