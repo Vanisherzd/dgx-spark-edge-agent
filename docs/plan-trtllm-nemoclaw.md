@@ -137,3 +137,10 @@ Cause, in layers:
    add a firewall rule if that matters.
 After the fix `nemoclaw edge-agent status` reports `Inference: healthy` and the TensorRT-LLM access log shows requests
 from 172.24.0.2 (the sandbox). System `ollama.service` was disabled at the user's request (pure TensorRT-LLM).
+
+## Result (2026-09-22 13:36)
+`nemoclaw onboard --resume` finished (steps 7-8), sandbox `edge-agent` Ready with policy preset `local-inference`,
+dashboard http://127.0.0.1:18789/ (`ssh -L 18789:127.0.0.1:18789 hsnl@192.168.2.60` from a workstation).
+Test turn: `nemoclaw edge-agent agent --agent main -m "..."` -> "I am inference/edge-agent and the GPU is visible."
+served by TensorRT-LLM on :8000. Nothing autostarts at boot: start the server with `HOST=0.0.0.0 scripts/serve-trt.sh`,
+then `nemoclaw edge-agent start` if the sandbox is stopped.
