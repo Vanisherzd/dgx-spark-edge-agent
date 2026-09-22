@@ -252,6 +252,39 @@ So dense is the default, keyword stays as the no-index fallback and as the basel
 Caveat worth keeping in view: 23 queries written by the same person who wrote the runbooks is a strong signal, not a
 benchmark. The eval set lives in `scripts/rag.py` and should grow with every fault case.
 
+## Five-case verification (2026-09-23 00:40)
+
+All five injectable faults, with `bad-config` run three times because it was the one that failed the round before.
+**7/7 PASS, no empty turns.**
+
+| Case | Result | Seconds | Calls | Path |
+| --- | --- | --- | --- | --- |
+| bad-config | PASS | 67 | 7 | logs -> read -> write -> restart |
+| bad-config | PASS | 387 | 10 | went astray, rescued by `self_heal` (see below) |
+| bad-config | PASS | 105 | 7 | logs -> read -> write -> restart |
+| nginx-stopped | PASS | 90 | 6 | restart |
+| upstream-down | PASS | 44 | 5 | start the upstream |
+| bad-upstream-name | PASS | 62 | 9 | read -> network_repair -> write -> restart -> verified both URLs |
+| container-removed | PASS | 82 | 9 | `recreate_stack` -> verified both URLs |
+
+The round before this one found a real defect: one `bad-config` run returned `stopReason=length` with nothing
+emitted. The model spent all 4096 output tokens arguing with itself about a missing semicolon and was cut off before
+producing a tool call. Onboarding's model defaults were wrong on two axes — `maxTokens` 4096 is not enough for a
+reasoning model driving a multi-step repair, and `contextWindow` claimed 131072 while `trtllm-serve` runs with
+`max_seq_len 32768`, so OpenClaw would have let a session grow past what the server accepts instead of compacting.
+Raised to 12288 and 32768. Three consecutive `bad-config` runs then passed.
+
+### The honest caveat
+
+The 387 s run passed, but not on its own reasoning. The agent read the `[emerg]` line, then wandered — `disk_usage`,
+`recreate_stack` on a container that plainly existed, a restart without changing the config — and only recovered when
+it called `ops__self_heal`, which runs the same loop on the host and fixed the file. It never called
+`search_runbooks`, which would have returned `nginx-config-error.md` and the exact procedure.
+
+So the fallback is doing real work, not sitting decorative: roughly one bad-config run in three needs it. Counting
+that as a clean pass would be dishonest. The gap is that the model skips retrieval when it believes it already knows
+the answer, and no prompt line has fixed that so far. Worth measuring again as the runbook set grows.
+
 ## Not yet
 Host-level actions (systemctl on the Spark itself), memory of past incidents, embedding-based retrieval, NemoClaw
 skill packaging. Add each only when a fault case needs it.

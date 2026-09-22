@@ -257,6 +257,8 @@ prompt 就是值班人員會收到的一句警報，沒有指定任何指令。�
 | upstream-down | PASS 47 秒 | PASS 62 秒 | 5、7 |
 | bad-upstream-name（新） | PASS 70 秒 | – | 9 |
 
+五個案例最新一輪複驗（bad-config 跑三次）**7/7 PASS、零空回合**，耗時 44 到 387 秒。其中一個 bad-config 回合是靠 `self_heal` 後備救回來的，agent 自己的推理走偏了，詳情與原因記在 `docs/agent-design.md`。
+
 前三個案例六輪都沒查 runbook，光靠 `check_health` → `docker_ps` → `docker_logs` 就解掉。新故障（`proxy_pass` 指到不存在的主機）才真的用到書面資料：agent 讀完 log 與設定後呼叫 `search_runbooks {"query":"host not found in upstream"}`，拿到對應 runbook 再修好。
 
 調整工具介面之前，同樣三個案例需要 prompt 直接寫出 `/sandbox/bin/ops call self_heal '{}'` 才會過，各花 2 到 3 分鐘。原因與修法見 `docs/agent-design.md` 的「Tool surface tuning」。
