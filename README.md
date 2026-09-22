@@ -14,6 +14,8 @@ scripts/probe.py              8-question needle accuracy over a synthetic runboo
 scripts/try.sh                throwaway server + bench|probe + smoke for a model/flag combo (:8101)
 scripts/bench-summary.py      logs/matrix.log → markdown table
 scripts/ops_api.py            host-side HTTP ops API (same tool whitelist) for the NemoClaw sandbox agent, :8790
+scripts/oai_shim.py           request-shape shim :8001 -> TRT-LLM :8000 (NemoClaw/OpenClaw turns need it)
+scripts/nemoclaw-drill.sh     inject a fault, let the NemoClaw sandbox agent fix it through the ops API, verify
 scripts/serve-summary.py      vllm bench serve JSON → markdown table (TTFT/TPOT/ITL/E2E)
 scripts/serve-trt.sh          TensorRT-LLM (production): trtllm-serve in the NGC container on :8000 (trt/nano.yaml); vLLM fallback stays on :8100
 systemd/trtllm-edge.service   user unit for the TensorRT-LLM path (Conflicts= vllm-edge; one engine at a time)
@@ -54,9 +56,12 @@ TensorRT-LLM + NemoClaw migration: `docs/plan-trtllm-nemoclaw.md`.
 ```bash
 cd ~/edge-agent
 HOST=0.0.0.0 nohup scripts/serve-trt.sh > logs/trt-serve.log 2>&1 &   # ~2 min to /health; refuses to restart a healthy server (FORCE=1 overrides)
+nohup uv run --no-sync scripts/oai_shim.py > logs/oai-shim.out 2>&1 &     # :8001, what the NemoClaw gateway calls
+nohup uv run --no-sync scripts/ops_api.py  > logs/ops-api.out  2>&1 &     # :8790, tools for the sandbox agent
 curl -sf http://127.0.0.1:8000/health && echo up
 nemoclaw edge-agent status                                             # Inference: healthy
-nemoclaw edge-agent agent --agent main -m "..."                        # one agent turn through the sandbox
+nemoclaw edge-agent agent --agent main --session-id t1 -m "..."        # one agent turn through the sandbox
+scripts/nemoclaw-drill.sh bad-config                                   # fault drill driven by the NemoClaw agent
 docker stop trtllm-edge                                                # stop the server
 ```
 The sandbox reaches the server through `inference.local` -> `http://host.openshell.internal:8000/v1`, which is why the

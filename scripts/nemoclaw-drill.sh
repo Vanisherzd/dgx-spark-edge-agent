@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# drill: inject a fault on the victim containers, ask the NemoClaw sandbox agent to fix it through the ops API, verify.
+cd ~/edge-agent; export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"; source .venv/bin/activate
+CASE="${1:-bad-config}"
+echo "=== $(date +%T) reset + inject $CASE"; python scripts/faults.py reset | tail -1; python scripts/faults.py inject "$CASE"
+: > logs/ops-api.log
+PROMPT='You are the on-call IT operations agent. An alert says the web stack is degraded. You can only act through the ops API at http://host.openshell.internal:8790 using curl: GET /tools lists the tools with JSON schemas; POST /call with body {"name":"<tool>","args":{...}} runs one tool (tools: check_health, docker_ps, docker_logs, docker_exec, docker_start, docker_restart, read_config, write_config, search_runbooks). Diagnose first (health, container states, logs, runbooks), then apply the least invasive fix, then verify with check_health until both URLs return 200. Finish with a short report: root cause, actions taken, final health.'
+echo "=== $(date +%T) NemoClaw agent turn"
+timeout 900 nemoclaw edge-agent agent --agent main --session-id "drill-$(date +%s)" -m "$PROMPT" 2>&1 | grep -vE "UNDICI|trace-warnings|^\s*$|Active gateway|^\[gateway\]" | cut -c1-500
+echo "=== $(date +%T) verify"; python scripts/faults.py verify
+echo "=== ops-api.log (what the sandbox agent called)"
+python3 - <<'PY'
+import json
+for l in open('logs/ops-api.log'):
+    d = json.loads(l)
+    print(d['ts'], d['from'], d['tool'], json.dumps(d['args'])[:90], '->', d['result'][:100].replace('\n', ' '))
+PY
+echo "DRILL_DONE $(date +%T)"

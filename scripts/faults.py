@@ -14,9 +14,18 @@ import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CONF_DIR = ROOT / "victim" / "conf.d"
-GOOD_CONF = (ROOT / "victim" / "conf.d" / "default.conf").read_text()
+# Canonical config lives in the script, not on disk: the agent may rewrite the file in its own style, and the fault
+# injection must still produce a broken file afterwards.
+GOOD_CONF = """server {
+    listen 80;
+    server_name _;
+    location / { return 200 "ok\\n"; add_header Content-Type text/plain; }
+    location /api/ { proxy_pass http://edge-victim-app:80/; proxy_connect_timeout 2s; proxy_read_timeout 5s; }
+}
+"""
 FRONT, APP, NET = "edge-victim", "edge-victim-app", "edge-net"
 BAD_CONF = GOOD_CONF.replace('return 200 "ok\\n";', 'return 200 "ok\\n"')  # drop one semicolon -> [emerg]
+assert BAD_CONF != GOOD_CONF
 
 
 def sh(cmd, check=False):

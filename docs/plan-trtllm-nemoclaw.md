@@ -144,3 +144,15 @@ dashboard http://127.0.0.1:18789/ (`ssh -L 18789:127.0.0.1:18789 hsnl@192.168.2.
 Test turn: `nemoclaw edge-agent agent --agent main -m "..."` -> "I am inference/edge-agent and the GPU is visible."
 served by TensorRT-LLM on :8000. Nothing autostarts at boot: start the server with `HOST=0.0.0.0 scripts/serve-trt.sh`,
 then `nemoclaw edge-agent start` if the sandbox is stopped.
+
+## Request-shape shim (2026-09-22, `scripts/oai_shim.py`)
+Once the route worked, real agent turns failed with `FailoverError: Message ordering conflict` — OpenClaw's label for
+an upstream 400. trtllm-serve validates chat messages against the OpenAI SDK typed dicts strictly, and OpenClaw's
+follow-up turns (`assistant` with `tool_calls` and null content plus extra keys, a `developer` message with null content)
+did not fit any union member. `scripts/oai_shim.py` (0.0.0.0:8001 -> 127.0.0.1:8000) rewrites `developer` -> `system`,
+blanks null content on non-assistant messages, flattens text-part arrays, keeps only the standard keys on assistant/tool
+messages and drops `store`/`metadata`; streaming passes through. The gateway provider points at the shim:
+`openshell provider update compatible-endpoint --config OPENAI_BASE_URL=http://host.openshell.internal:8001/v1`.
+Start order after a reboot: TRT-LLM (`HOST=0.0.0.0 scripts/serve-trt.sh`) -> `scripts/oai_shim.py` -> `scripts/ops_api.py`
+-> `nemoclaw edge-agent start`. `SHIM_DEBUG=1` logs message shapes and upstream 400 bodies to `logs/oai-shim.log`.
+NemoClaw runtimes available on this install: openclaw (default, used here), hermes, langchain-deepagents-code.
