@@ -12,6 +12,10 @@ NAME="${NAME:-trtllm-edge}"
 SNAP=$(ls -d "$HOME/.cache/huggingface/hub/models--${MODEL//\//--}/snapshots/"*/ 2>/dev/null | head -1 || true)
 [ -n "$SNAP" ] || { echo "model $MODEL not in the HF cache; run: uv run hf download $MODEL" >&2; exit 1; }
 TOK_IN_CONTAINER="/root/.cache/huggingface/hub/${SNAP#"$HOME/.cache/huggingface/hub/"}"
+# Already serving? Do not kill a healthy server by accident (pass FORCE=1 to restart anyway).
+if [ "${FORCE:-0}" != "1" ] && docker ps --format '{{.Names}}' | grep -qx "$NAME" && curl -sf "http://127.0.0.1:${PORT:-8000}/health" >/dev/null 2>&1; then
+  echo "$NAME is already running and healthy on port ${PORT:-8000}; FORCE=1 to restart" >&2; exit 0
+fi
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 exec docker run --rm --name "$NAME" --gpus all --ipc host --network host \
   -e HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}" -e PYTORCH_ALLOC_CONF=expandable_segments:True -e TRTLLM_ENABLE_PDL="${TRTLLM_ENABLE_PDL:-1}" \
